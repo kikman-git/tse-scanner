@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Secrets — J-Quants credentials live here, never commit
+.env
+
+# Data store (DESIGN.md §8: DuckDB + Parquet). Large + reproducible from ingestion.
+data/*.duckdb
+data/*.parquet
+data/raw/
+data/cache/
+
+# Deep-research run artifacts (DESIGN.md §15) — memos live in the DuckDB research table;
+# the per-run dirs (pack/memo/verdict/raw collector reports/logs) are a local archive.
+data/research/
+
+# Node / Next.js (web/) — reinstall with `npm install` in web/, rebuild with `npm run build`
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Logs (runtime, reproducible)
+*.log
+
+# OS
+.DS_Store
