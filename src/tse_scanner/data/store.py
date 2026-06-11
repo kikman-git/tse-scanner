@@ -17,7 +17,7 @@ Tables:
                box_high, box_low, last_close, adv_yen, margin_as_of, margin_published)
   research(code, research_date, status, verdict, confidence, one_liner, squeeze_killers,
            catalysts, sources, memo_md, memo_path, model, cost_usd, num_turns, duration_s,
-           error, started_at, finished_at)   -- §15 deep-research memos; agent never writes here
+           error, started_at, finished_at, pid)   -- §15 deep-research memos; agent never writes here
 
 NOTE on point-in-time universe: the *free* path (JPX `data_j.xls`) publishes only the **current**
 listed/eligibility snapshot — there is no free per-day eligibility history — so `listed_info` is a
@@ -124,8 +124,14 @@ CREATE TABLE IF NOT EXISTS research (
     error           VARCHAR,
     started_at      TIMESTAMP,
     finished_at     TIMESTAMP,
+    pid             INTEGER,           -- wrapper PID while status='running'; lets any reader
+                                       -- check real process liveness, not just a wall-clock timer
     PRIMARY KEY (code, research_date)
 );
+
+-- Migrate DBs created before `pid` existed (CREATE IF NOT EXISTS above won't add a column to an
+-- existing table). ADD COLUMN IF NOT EXISTS is idempotent, so this is a no-op once applied.
+ALTER TABLE research ADD COLUMN IF NOT EXISTS pid INTEGER;
 """
 
 
@@ -495,7 +501,7 @@ class Store:
         self.init_schema()
         cols = ["code", "research_date", "status", "verdict", "confidence", "one_liner",
                 "squeeze_killers", "catalysts", "sources", "memo_md", "memo_path", "model",
-                "cost_usd", "num_turns", "duration_s", "error", "started_at", "finished_at"]
+                "cost_usd", "num_turns", "duration_s", "error", "started_at", "finished_at", "pid"]
         df = pd.DataFrame([{c: row.get(c) for c in cols}])
         with self.connect() as con:
             self._upsert(con, "research", df, ["code", "research_date"])

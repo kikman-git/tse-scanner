@@ -191,8 +191,11 @@ def run_research(code: str, *, force: bool = False, settings: Settings | None = 
     pack_path.write_text(pack_md)
 
     started = datetime.now()
+    # Record our PID on the 'running' row: a reader (the API) can then check real process
+    # liveness and fail a crashed run immediately, instead of blind-waiting out a stale timer.
     store.upsert_research({"code": code, "research_date": today, "status": "running",
-                           "model": settings.research_model, "started_at": started})
+                           "model": settings.research_model, "started_at": started,
+                           "pid": os.getpid()})
 
     prompt = (
         f"Read the file {SKILL_REL} and execute it now.\n"
@@ -219,38 +222,51 @@ def run_research(code: str, *, force: bool = False, settings: Settings | None = 
         except FileNotFoundError:
             error = f"claude binary not found ({settings.claude_bin!r}) — set TSE_CLAUDE_BIN"
 
-    envelope = _parse_envelope(log_path.read_text()) if log_path.exists() else {}
-    verdict, memo_md, art_err = (None, None, error) if error else _read_artifacts(run_dir)
-    if verdict is None and not error and envelope.get("is_error"):
-        # the agent died API-side (429/5xx/limit) — its own words beat "no verdict.json"
-        art_err = f"claude run errored: {envelope.get('result') or envelope.get('subtype')}"
-    finished = datetime.now()
+    # Finalize inside a guard: any crash here (envelope parse, artifact read, DB write) must still
+    # replace the 'running' row, never orphan it. A hard kill (OOM/SIGKILL) skips this — that case
+    # is caught by the reader's PID liveness check — but a catchable error self-heals to 'failed'.
+    try:
+        envelope = _parse_envelope(log_path.read_text()) if log_path.exists() else {}
+        verdict, memo_md, art_err = (None, None, error) if error else _read_artifacts(run_dir)
+        if verdict is None and not error and envelope.get("is_error"):
+            # the agent died API-side (429/5xx/limit) — its own words beat "no verdict.json"
+            art_err = f"claude run errored: {envelope.get('result') or envelope.get('subtype')}"
+        finished = datetime.now()
 
-    row = {
-        "code": code, "research_date": today, "model": settings.research_model,
-        "started_at": started, "finished_at": finished,
-        "cost_usd": envelope.get("total_cost_usd"), "num_turns": envelope.get("num_turns"),
-        "duration_s": (envelope.get("duration_ms") or 0) / 1000 or (finished - started).total_seconds(),
-        "memo_path": str(run_dir / "memo.md"),
-    }
-    if verdict is None:
-        row.update({"status": "failed", "error": art_err or "unknown failure"})
+        row = {
+            "code": code, "research_date": today, "model": settings.research_model,
+            "started_at": started, "finished_at": finished,
+            "cost_usd": envelope.get("total_cost_usd"), "num_turns": envelope.get("num_turns"),
+            "duration_s": (envelope.get("duration_ms") or 0) / 1000 or (finished - started).total_seconds(),
+            "memo_path": str(run_dir / "memo.md"),
+        }
+        if verdict is None:
+            row.update({"status": "failed", "error": art_err or "unknown failure"})
+            store.upsert_research(row)
+            return ResearchResult(code=code, research_date=today, status="failed", error=row["error"],
+                                  run_dir=run_dir, cost_usd=row["cost_usd"], num_turns=row["num_turns"],
+                                  duration_s=row["duration_s"], pack_warnings=pack_warnings)
+
+        row.update({
+            "status": "done", "verdict": verdict["verdict"],
+            "confidence": verdict.get("confidence"), "one_liner": verdict.get("one_liner"),
+            "squeeze_killers": json.dumps(verdict.get("squeeze_killers", []), ensure_ascii=False),
+            "catalysts": json.dumps(verdict.get("catalysts", []), ensure_ascii=False),
+            "sources": json.dumps(verdict.get("sources", []), ensure_ascii=False),
+            "memo_md": memo_md,
+        })
         store.upsert_research(row)
-        return ResearchResult(code=code, research_date=today, status="failed", error=row["error"],
-                              run_dir=run_dir, cost_usd=row["cost_usd"], num_turns=row["num_turns"],
+        return ResearchResult(code=code, research_date=today, status="done",
+                              verdict=verdict["verdict"], one_liner=verdict.get("one_liner"),
+                              memo_path=row["memo_path"], run_dir=run_dir,
+                              cost_usd=row["cost_usd"], num_turns=row["num_turns"],
                               duration_s=row["duration_s"], pack_warnings=pack_warnings)
-
-    row.update({
-        "status": "done", "verdict": verdict["verdict"],
-        "confidence": verdict.get("confidence"), "one_liner": verdict.get("one_liner"),
-        "squeeze_killers": json.dumps(verdict.get("squeeze_killers", []), ensure_ascii=False),
-        "catalysts": json.dumps(verdict.get("catalysts", []), ensure_ascii=False),
-        "sources": json.dumps(verdict.get("sources", []), ensure_ascii=False),
-        "memo_md": memo_md,
-    })
-    store.upsert_research(row)
-    return ResearchResult(code=code, research_date=today, status="done",
-                          verdict=verdict["verdict"], one_liner=verdict.get("one_liner"),
-                          memo_path=row["memo_path"], run_dir=run_dir,
-                          cost_usd=row["cost_usd"], num_turns=row["num_turns"],
-                          duration_s=row["duration_s"], pack_warnings=pack_warnings)
+    except Exception as e:  # noqa: BLE001 — never leave the 'running' row dangling
+        try:
+            store.upsert_research({"code": code, "research_date": today, "status": "failed",
+                                   "model": settings.research_model, "started_at": started,
+                                   "finished_at": datetime.now(),
+                                   "error": f"wrapper crashed finalizing: {type(e).__name__}: {e}"})
+        except Exception:  # noqa: BLE001 — preserve the original traceback if even this fails
+            pass
+        raise

@@ -90,6 +90,7 @@ export interface ResearchRow {
   error: string | null;
   started_at: string | null;
   finished_at: string | null;
+  pid: number | null;             // wrapper PID while running (server-side liveness check)
 }
 
 export interface ResearchPayload {

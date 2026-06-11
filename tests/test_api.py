@@ -6,6 +6,8 @@ log, never held in the request).
 """
 
 import json
+import os
+import subprocess
 from datetime import date
 
 import pandas as pd
@@ -91,8 +93,29 @@ def test_research_states_none_done_and_stale_running(client, tmp_path):
     s.upsert_research({"code": "8179", "research_date": date(2026, 6, 10), "status": "running",
                        "started_at": pd.Timestamp("2026-06-10T00:00:00")})
     j = client.get("/research/8179").json()
-    assert j["state"] == "failed"  # stale 'running' row = crashed run
+    assert j["state"] == "failed"  # stale 'running' row (no pid, past window) = crashed run
     assert "stale" in j["row"]["error"]
+
+
+def test_research_running_with_live_pid_stays_running(client, tmp_path):
+    """Regression: a healthy in-flight run must read 'running', not 'failed'. The bug computed
+    age off a date-truncated started_at, so every live run looked >20min stale within a day."""
+    s = _seed(tmp_path)
+    s.upsert_research({"code": "9755", "research_date": date.today(), "status": "running",
+                       "started_at": pd.Timestamp.now(), "pid": os.getpid()})  # this test == alive
+    j = client.get("/research/9755").json()
+    assert j["state"] == "running"
+
+
+def test_research_running_with_dead_pid_fails_fast(client, tmp_path):
+    """A fresh 'running' row whose process is already gone fails immediately — no 20min wait."""
+    s = _seed(tmp_path)
+    dead = subprocess.Popen(["true"])
+    dead.wait()  # pid now reliably refers to an exited process
+    s.upsert_research({"code": "9755", "research_date": date.today(), "status": "running",
+                       "started_at": pd.Timestamp.now(), "pid": dead.pid})
+    j = client.get("/research/9755").json()
+    assert j["state"] == "failed" and "crashed" in j["row"]["error"]
 
 
 class _FakeProc:

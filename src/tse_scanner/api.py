@@ -13,6 +13,7 @@ collisions).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -119,22 +120,54 @@ def research_verdicts() -> dict:
     return {"verdicts": _records(_store().research_verdicts())}
 
 
+def _research_alive(raw: "pd.Series") -> bool:
+    """Is a 'running' research row backed by a live wrapper process? (DESIGN.md §15)
+
+    Two guards, both required to read 'running':
+      - age: a legit run can't outlast the wrapper's timeout; past `_RUNNING_STALE_S` it is a
+        hang/crash regardless of PID (also defends against PID reuse).
+      - PID: the wrapper records its PID; a same-host reader checks `os.kill(pid, 0)`, so a dead
+        process fails the run immediately instead of blind-waiting out the stale timer.
+    Legacy rows without a PID fall back to the age guard alone.
+    """
+    started = raw.get("started_at")
+    if started is None or started != started:  # NaT / missing → can't be a live run
+        return False
+    if time.time() - pd.Timestamp(started).timestamp() > _RUNNING_STALE_S:
+        return False
+    pid = raw.get("pid")
+    if pid is None or pid != pid:  # legacy row: trust the age guard above
+        return True
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False  # wrapper gone without finalizing → crashed
+    except PermissionError:
+        return True   # exists but another uid (not expected on this loopback host)
+
+
 @app.get("/research/{code}")
 def research(code: str) -> dict:
     """Latest research row for `code` + derived state for the panel's 4 states
-    (none / running / failed / done — DESIGN.md §15). Stale 'running' rows count as failed."""
+    (none / running / failed / done — DESIGN.md §15). A 'running' row whose process is dead or
+    past the staleness window is reported as failed."""
     df = _store().latest_research(code)
     if df.empty:
         spawned = _procs["research"].get(code)
         running = spawned is not None and (spawned.poll() is None)
         return {"code": code, "state": "running" if running else "none", "row": None}
+    raw = df.iloc[0]  # full-precision timestamps + pid (the _records projection truncates dates)
+    state = raw["status"]
+    if state == "running" and not _research_alive(raw):
+        state = "failed"
     row = _records(df)[0]
-    state = row["status"]
-    if state == "running":
-        age = time.time() - pd.Timestamp(row["started_at"]).timestamp()
-        if age > _RUNNING_STALE_S:
-            state = "failed"
-            row["error"] = row.get("error") or "run crashed before writing a result (stale 'running' row)"
+    for ts in ("started_at", "finished_at"):  # restore time-of-day _records dropped
+        v = raw.get(ts)
+        row[ts] = None if (v is None or v != v) else pd.Timestamp(v).isoformat()
+    if state == "failed" and raw["status"] == "running":
+        row["status"] = "failed"
+        row["error"] = row.get("error") or "run crashed before writing a result (stale 'running' row)"
     return {"code": code, "state": state, "row": row}
 
 
