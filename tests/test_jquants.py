@@ -1,4 +1,4 @@
-"""J-Quants V2 client tests (PLAN.md Track B).
+"""J-Quants V2 client tests.
 
 The mappers are pinned against *real* response rows captured from the live API on 2026-06-11,
 and `derive_published_date` is pinned against the free-path PDF overlap week (2026-06-05 →
@@ -31,7 +31,7 @@ TOPIX_ROW = {"Date": "2026-06-01", "Code": "0000", "O": 3946.07, "H": 3971.78, "
              "C": 3940.7}
 
 
-# --- §6.1 publication-date derivation ------------------------------------------------------------
+# --- publication-date derivation ------------------------------------------------------------
 def test_published_date_matches_free_pdf_overlap_week():
     # The week stored from the free PDF: as-of Fri 2026-06-05, header said published 2026-06-09.
     assert jq.derive_published_date(date(2026, 6, 5)) == date(2026, 6, 9)
@@ -147,7 +147,7 @@ def test_get_raises_without_key():
 
 # --- store round-trip + staleness gate ------------------------------------------------------------
 def test_margin_week_roundtrip_point_in_time(tmp_path):
-    """API week → mapper → store → §6.1 read with the *derived* publication date."""
+    """API week → mapper → store → read with the *derived* publication date."""
     from tse_scanner.data.store import Store
 
     s = Store(Settings(duckdb_path=tmp_path / "t.duckdb"))
@@ -188,3 +188,37 @@ def test_universe_drops_stale_priced_names(tmp_path):
 
     uni = build_universe(as_of, Params(), s)
     assert list(uni["code"]) == ["1111"]
+
+
+def test_sync_skips_topix_when_store_current(tmp_path):
+    """Store already holds today's TOPIX bar — sync must not request the inverted
+    from>to range (J-Quants 400s it and the whole rescan dies)."""
+    from datetime import timedelta
+
+    from tse_scanner.data.jquants_sync import sync
+    from tse_scanner.data.store import Store
+
+    s = Store(Settings(duckdb_path=tmp_path / "t.duckdb"))
+    s.init_schema()
+    s.upsert_topix(pd.DataFrame([{"date": date.today(), "open": 1.0, "high": 1.0,
+                                  "low": 1.0, "close": 1.0}]))
+
+    topix_calls: list[tuple] = []
+
+    class _Client:
+        def margin_asof_dates(self):
+            return [date.today() - timedelta(days=7)]
+
+        def listed_master(self, date=None):
+            return pd.DataFrame()
+
+        def weekly_margin_interest(self, date=None):
+            return pd.DataFrame()
+
+        def topix_bars(self, date_from=None, date_to=None):
+            topix_calls.append((date_from, date_to))
+            return pd.DataFrame()
+
+    out = sync(s, _Client(), prices=False, progress=lambda _m: None)
+    assert topix_calls == []
+    assert out["topix_rows"] == 0

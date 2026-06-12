@@ -1,4 +1,4 @@
-"""Coil — "is the spring wound?" — timing (Phase 1 — DESIGN.md §3.2).
+"""Coil — "is the spring wound?" — timing (Phase 1).
 
 State, not symptom. We want volatility unusually low **for this name** AND price contained in a
 tight band:
@@ -51,7 +51,7 @@ def atr(ohlc: "pd.DataFrame", period: int = _ATR_PERIOD) -> "pd.Series":
     prev_close = close.shift(1)
     tr = (high - low).combine((high - prev_close).abs(), max).combine(
         (low - prev_close).abs(), max
-    )
+)
     return tr.rolling(period).mean()
 
 

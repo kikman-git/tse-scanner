@@ -1,6 +1,6 @@
-"""Free TSE listed-issue universe from JPX 東証上場銘柄一覧 ``data_j.xls`` (DESIGN.md §5).
+"""Free TSE listed-issue universe from JPX 東証上場銘柄一覧 ``data_j.xls``.
 
-Columns (Shift-JIS .xls): 日付, コード, 銘柄名, 市場・商品区分, 33業種コード/区分, 17業種…, 規模…
+Columns (Shift-JIS.xls): 日付, コード, 銘柄名, 市場・商品区分, 33業種コード/区分, 17業種…, 規模…
 Gives code, name, segment, sector. The 貸借銘柄 gate itself comes from the margin file's `B` flag
 (jpx_margin), not from here.
 """
@@ -23,7 +23,7 @@ _SEGMENT = {
 def parse_universe(xls_path: str | Path) -> "pd.DataFrame":
     import pandas as pd
 
-    u = pd.read_excel(xls_path)  # .xls → xlrd engine
+    u = pd.read_excel(xls_path)  #.xls → xlrd engine
     u = u.rename(columns={"コード": "code", "銘柄名": "name",
                           "市場・商品区分": "segment_ja", "33業種区分": "sector33"})
     u["code"] = u["code"].astype(str).str.strip()

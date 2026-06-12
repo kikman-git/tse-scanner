@@ -1,11 +1,11 @@
-"""Point-in-time data store (Phase 0 — DESIGN.md §6, §8): DuckDB + Parquet.
+"""Point-in-time data store (Phase 0): DuckDB + Parquet.
 
 The single most important correctness property of this whole project lives here:
 
   **Weekly margin is stored with its as-of date AND its publication date, and every point-in-time
   read filters on publication date.** Friday's 信用取引残高 is published the following Tue–Wed;
-  using it before then is trading on data that didn't exist and makes the backtest lie (DESIGN.md
-  §6.1). Prices are EOD and need no such lag.
+  using it before then is trading on data that didn't exist and makes the backtest lie (
+). Prices are EOD and need no such lag.
 
 Tables:
   prices(code, date, open, high, low, close, volume, turnover)
@@ -13,16 +13,17 @@ Tables:
                 neg_short, sys_short, neg_long, sys_long, is_taishaku)
   listed_info(code, name, segment, segment_ja, sector33, is_domestic_equity, is_taishaku, ingested_at)
   scan_results(scan_date, code, name, segment, stage, score, fuel, coil, ignition,
-               days_to_cover, credit_ratio, short_total, long_total, bb_width_pct,
-               box_high, box_low, last_close, adv_yen, margin_as_of, margin_published)
+               has_fuel, days_to_cover, dtc_pctile, credit_ratio, short_total, long_total,
+               bb_width_pct, box_height_atr, box_high, box_low, last_close, adv_yen,
+               margin_as_of, margin_published)
   research(code, research_date, status, verdict, confidence, one_liner, squeeze_killers,
-           catalysts, sources, memo_md, memo_path, model, cost_usd, num_turns, duration_s,
-           error, started_at, finished_at, pid)   -- §15 deep-research memos; agent never writes here
+           catalysts, analyst_targets, sources, memo_md, memo_path, model, cost_usd, num_turns,
+           duration_s, error, started_at, finished_at, pid)  -- deep-research; agent never writes here
 
 NOTE on point-in-time universe: the *free* path (JPX `data_j.xls`) publishes only the **current**
 listed/eligibility snapshot — there is no free per-day eligibility history — so `listed_info` is a
-current snapshot, not a valid_from/valid_to history. Survivorship-free reconstruction (DESIGN.md
-§12) needs the paid J-Quants `listed/info` history; until then the backtest universe is
+current snapshot, not a valid_from/valid_to history. Survivorship-free reconstruction (
+) needs the paid J-Quants `listed/info` history; until then the backtest universe is
 present-membership and that caveat is surfaced, not hidden.
 """
 
@@ -53,14 +54,14 @@ CREATE TABLE IF NOT EXISTS prices (
 CREATE TABLE IF NOT EXISTS weekly_margin (
     code           VARCHAR NOT NULL,
     as_of_date     DATE    NOT NULL, -- 申込み現在 (Friday)
-    published_date DATE,             -- public the following Tue–Wed (DESIGN.md §6.1)
+    published_date DATE,             -- public the following Tue–Wed
     short_total    BIGINT,           -- 信用売残
     long_total     BIGINT,           -- 信用買残
     neg_short      BIGINT,
     sys_short      BIGINT,
     neg_long       BIGINT,
     sys_long       BIGINT,
-    is_taishaku    BOOLEAN,          -- 貸借銘柄 (B flag) — DESIGN.md §5 universe gate
+    is_taishaku    BOOLEAN,          -- 貸借銘柄 (B flag) — universe gate
     PRIMARY KEY (code, as_of_date)
 );
 CREATE TABLE IF NOT EXISTS listed_info (
@@ -98,22 +99,40 @@ CREATE TABLE IF NOT EXISTS scan_results (
     PRIMARY KEY (scan_date, code)
 );
 CREATE TABLE IF NOT EXISTS topix (
-    date  DATE NOT NULL,             -- TOPIX OHLC — event-study benchmark (DESIGN.md §6)
+    date  DATE NOT NULL,             -- TOPIX OHLC — event-study benchmark
     open  DOUBLE,
     high  DOUBLE,
     low   DOUBLE,
     close DOUBLE,
     PRIMARY KEY (date)
 );
+CREATE TABLE IF NOT EXISTS fins_summary (
+    code        VARCHAR NOT NULL,    -- 4-digit base code (the stack's key)
+    code5       VARCHAR,
+    disc_date   DATE    NOT NULL,    -- disclosure date — the point-in-time axis
+    disc_time   VARCHAR,             -- verbatim ('15:00:00' ≈ after-close → next session tradable)
+    disc_no     VARCHAR NOT NULL,    -- TDnet disclosure number (unique per filing)
+    doc_type    VARCHAR,             -- …FinancialStatements… | EarnForecastRevision | …
+    per_type    VARCHAR,             -- 1Q | 2Q | 3Q | FY
+    per_end     DATE,
+    fy_end      DATE,                -- the FY this row reports/guides
+    nxt_fy_end  DATE,                -- FY that NxF* guidance targets (set on FY docs)
+    sales BIGINT, op BIGINT, odp BIGINT, np BIGINT, eps DOUBLE,
+    f_sales BIGINT, f_op BIGINT, f_odp BIGINT, f_np BIGINT, f_eps DOUBLE,
+    f_sales_2q BIGINT, f_op_2q BIGINT, f_odp_2q BIGINT, f_np_2q BIGINT, f_eps_2q DOUBLE,
+    nxf_sales BIGINT, nxf_op BIGINT, nxf_odp BIGINT, nxf_np BIGINT, nxf_eps DOUBLE,
+    PRIMARY KEY (code, disc_no)
+);
 CREATE TABLE IF NOT EXISTS research (
     code            VARCHAR NOT NULL,
     research_date   DATE    NOT NULL,
     status          VARCHAR NOT NULL,  -- running | done | failed
-    verdict         VARCHAR,           -- SUPPORTS | NEUTRAL | OPPOSES (DESIGN.md §15)
+    verdict         VARCHAR,           -- SUPPORTS | NEUTRAL | OPPOSES
     confidence      VARCHAR,           -- low | medium | high
     one_liner       VARCHAR,
     squeeze_killers VARCHAR,           -- JSON array (text)
     catalysts       VARCHAR,           -- JSON array of {date, event} (text)
+    analyst_targets VARCHAR,           -- JSON array of {house, target, rating, date} — exit-ceiling cluster
     sources         VARCHAR,           -- JSON array of URLs (text)
     memo_md         VARCHAR,           -- full memo — the web UI renders from here, not the fs
     memo_path       VARCHAR,
@@ -132,6 +151,12 @@ CREATE TABLE IF NOT EXISTS research (
 -- Migrate DBs created before `pid` existed (CREATE IF NOT EXISTS above won't add a column to an
 -- existing table). ADD COLUMN IF NOT EXISTS is idempotent, so this is a no-op once applied.
 ALTER TABLE research ADD COLUMN IF NOT EXISTS pid INTEGER;
+ALTER TABLE research ADD COLUMN IF NOT EXISTS analyst_targets VARCHAR;
+-- 2026-06-12 de-gated ladder: fuel becomes an overlay, so the scan persists the gate boolean and
+-- its inputs (cross-sectional DtC percentile) plus the coil tightness that was silently filtering.
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS has_fuel BOOLEAN;
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS dtc_pctile DOUBLE;
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS box_height_atr DOUBLE;
 """
 
 
@@ -177,7 +202,7 @@ class Store:
             key_sql = ", ".join(keys)
             con.execute(
                 f"DELETE FROM {table} WHERE ({key_sql}) IN (SELECT {key_sql} FROM _tmp)"
-            )
+)
             col_sql = ", ".join(cols)
             con.execute(f"INSERT INTO {table} ({col_sql}) SELECT {col_sql} FROM _tmp")
         finally:
@@ -200,7 +225,7 @@ class Store:
             return self._upsert(con, "prices", df, ["code", "date"])
 
     def upsert_weekly_margin(self, df: "pd.DataFrame", *, as_of: date, published: date | None) -> int:
-        """Persist BOTH as_of_date and published_date (DESIGN.md §6.1).
+        """Persist BOTH as_of_date and published_date.
 
         `df` is one weekly print as returned by jpx_margin.parse_weekly_margin (per-issue rows);
         `as_of`/`published` come from jpx_margin.parse_dates (the PDF header).
@@ -253,7 +278,7 @@ class Store:
             return self._upsert(con, "listed_info", df, ["code"])
 
     def upsert_topix(self, df: "pd.DataFrame") -> int:
-        """Write TOPIX OHLC rows (date, open, high, low, close) — the §6 benchmark series."""
+        """Write TOPIX OHLC rows (date, open, high, low, close) — the benchmark series."""
         import pandas as pd
 
         if df is None or df.empty:
@@ -264,6 +289,60 @@ class Store:
         self.init_schema()
         with self.connect() as con:
             return self._upsert(con, "topix", df, ["date"])
+
+    def upsert_fins_summary(self, df: "pd.DataFrame") -> int:
+        """Write fins/summary disclosure rows (as produced by jquants.rows_to_fins_summary)."""
+        if df is None or df.empty:
+            return 0
+        cols = ["code", "code5", "disc_date", "disc_time", "disc_no", "doc_type", "per_type",
+                "per_end", "fy_end", "nxt_fy_end",
+                "sales", "op", "odp", "np", "eps",
+                "f_sales", "f_op", "f_odp", "f_np", "f_eps",
+                "f_sales_2q", "f_op_2q", "f_odp_2q", "f_np_2q", "f_eps_2q",
+                "nxf_sales", "nxf_op", "nxf_odp", "nxf_np", "nxf_eps"]
+        df = df[[c for c in cols if c in df.columns]]
+        self.init_schema()
+        with self.connect() as con:
+            return self._upsert(con, "fins_summary", df, ["code", "disc_no"])
+
+    def fins_history(self, code: str, asof: date | None = None, *, strict: bool = True) -> "pd.DataFrame":
+        """All disclosures for `code`, point-in-time, ordered by disclosure date.
+
+        `strict=True` (default) keeps rows disclosed **strictly before** `asof` — most 決算/修正
+        land at/after the 15:00–15:30 close, so a same-day print was not knowable when that day's
+        bar was tradable. Same discipline as the margin publication-date filter, one day tighter.
+        """
+        self.init_schema()
+        where, params = "code = ?", [str(code)]
+        if asof is not None:
+            where += f" AND disc_date {'<' if strict else '<='} ?"
+            params.append(asof)
+        with self.connect() as con:
+            return con.execute(
+                f"SELECT * FROM fins_summary WHERE {where} ORDER BY disc_date, disc_time",
+                params,
+).df()
+
+    def revision_events(self, start: date | None = None, end: date | None = None) -> "pd.DataFrame":
+        """All standalone 業績予想修正 disclosures in [start, end] — the reactive arm's event list."""
+        self.init_schema()
+        where, params = "doc_type = 'EarnForecastRevision'", []
+        if start is not None:
+            where += " AND disc_date >= ?"
+            params.append(start)
+        if end is not None:
+            where += " AND disc_date <= ?"
+            params.append(end)
+        with self.connect() as con:
+            return con.execute(
+                f"SELECT * FROM fins_summary WHERE {where} ORDER BY disc_date, code", params,
+).df()
+
+    def fins_codes(self) -> set[str]:
+        """Codes already having fins_summary rows — the sync diff base."""
+        self.init_schema()
+        with self.connect() as con:
+            return {r[0] for r in con.execute("SELECT DISTINCT code FROM fins_summary").fetchall()}
 
     def write_scan(self, df: "pd.DataFrame") -> int:
         """Persist a scan run (one row per code for that scan_date)."""
@@ -282,7 +361,7 @@ class Store:
                    WHERE code = ? AND published_date IS NOT NULL AND published_date <= ?
                    ORDER BY as_of_date DESC LIMIT 1""",
                 [str(code), asof],
-            ).df()
+).df()
 
     def latest_margin(self, asof: date | None = None) -> "pd.DataFrame":
         """Each code's most-recent margin print published on/before `asof` (latest overall if None).
@@ -300,7 +379,7 @@ class Store:
                     WHERE {where}
                     QUALIFY ROW_NUMBER() OVER (PARTITION BY code ORDER BY as_of_date DESC) = 1""",
                 params,
-            ).df()
+).df()
 
     def margin_history(self, code: str, asof: date | None = None, prints: int = 3) -> "pd.DataFrame":
         """Last `prints` weekly prints for `code` (publication-date filtered), oldest→newest."""
@@ -314,11 +393,11 @@ class Store:
                 f"""SELECT * FROM weekly_margin WHERE {where}
                     ORDER BY as_of_date DESC LIMIT {int(prints)}""",
                 params,
-            ).df().iloc[::-1].reset_index(drop=True)
+).df().iloc[::-1].reset_index(drop=True)
 
     def margin_trends(
         self, codes: list[str], asof: date | None = None, prints: int = 3
-    ) -> dict[str, "pd.DataFrame"]:
+) -> dict[str, "pd.DataFrame"]:
         """Last `prints` prints per code (publication-date filtered), oldest→newest — keyed by code.
 
         Batched form of `margin_history` for the scan loop: one query instead of one-per-code. The
@@ -344,7 +423,7 @@ class Store:
                                 <= {int(prints)}
                         ORDER BY code, as_of_date""",
                     params,
-                ).df()
+).df()
             finally:
                 con.unregister("_codes")
         if df.empty:
@@ -364,7 +443,7 @@ class Store:
                 params.append(end)
             df = con.execute(
                 f"SELECT * FROM prices WHERE {where} ORDER BY date", params
-            ).df()
+).df()
         if not df.empty:
             import pandas as pd
 
@@ -385,7 +464,7 @@ class Store:
                        ROW_NUMBER() OVER (PARTITION BY code ORDER BY date DESC) AS rn,
                        COUNT(*)     OVER (PARTITION BY code)                    AS n
                 FROM prices {where}
-            )
+)
             SELECT code,
                    MAX(n)                                          AS n_sessions,
                    MAX(CASE WHEN rn = 1 THEN close END)            AS last_close,
@@ -397,8 +476,13 @@ class Store:
         with self.connect() as con:
             return con.execute(sql, params).df()
 
-    def all_prices(self, codes: list[str], asof: date | None = None) -> "pd.DataFrame":
-        """All OHLCV rows for `codes` (≤ asof), one frame ordered by (code, date) — for the scan."""
+    def all_prices(self, codes: list[str], asof: date | None = None,
+                   start: date | None = None) -> "pd.DataFrame":
+        """All OHLCV rows for `codes` in [start, asof], ordered by (code, date) — for the scan.
+
+        `start` is a pure I/O bound (the scan tails a fixed session count anyway); it must be set
+        generously below the longest signal lookback, never to filter signal-visible data.
+        """
         import pandas as pd
 
         if not codes:
@@ -408,13 +492,16 @@ class Store:
         params: list = []
         if asof is not None:
             cond += " AND date <= ?"
-            params = [asof]
+            params.append(asof)
+        if start is not None:
+            cond += " AND date >= ?"
+            params.append(start)
         with self.connect() as con:
             con.register("_codes", pd.DataFrame({"code": codes}))
             try:
                 df = con.execute(
                     f"SELECT * FROM prices WHERE {cond} ORDER BY code, date", params
-                ).df()
+).df()
             finally:
                 con.unregister("_codes")
         if not df.empty:
@@ -445,28 +532,28 @@ class Store:
         return df
 
     def margin_weeks(self) -> list[date]:
-        """Distinct as-of dates already in weekly_margin — the sync diff base (Track B)."""
+        """Distinct as-of dates already in weekly_margin — the sync diff base."""
         self.init_schema()
         with self.connect() as con:
             return [r[0] for r in con.execute(
                 "SELECT DISTINCT as_of_date FROM weekly_margin ORDER BY as_of_date"
-            ).fetchall()]
+).fetchall()]
 
     def price_date_ranges(self) -> "pd.DataFrame":
-        """Per-code min/max(date) in prices — drives the incremental bars sync (Track B)."""
+        """Per-code min/max(date) in prices — drives the incremental bars sync."""
         self.init_schema()
         with self.connect() as con:
             return con.execute(
                 "SELECT code, min(date) AS first_date, max(date) AS last_date "
                 "FROM prices GROUP BY code"
-            ).df()
+).df()
 
     def read_scan(self, scan_date: date | None = None) -> "pd.DataFrame":
         """Read a scan run (the latest if `scan_date` is None)."""
         with self.connect() as con:
             if not con.execute(
                 "SELECT 1 FROM information_schema.tables WHERE table_name='scan_results'"
-            ).fetchone():
+).fetchone():
                 import pandas as pd
 
                 return pd.DataFrame()
@@ -477,7 +564,7 @@ class Store:
                     import pandas as pd
 
                     return pd.DataFrame()
-            # Gate-by-stage then score (DESIGN.md §7). `stage` is text, so rank it explicitly by the
+            # Gate-by-stage then score. `stage` is text, so rank it explicitly by the
             # lifecycle ladder (matches pipeline.Stage) rather than sorting the string alphabetically.
             return con.execute(
                 """SELECT * FROM scan_results WHERE scan_date = ?
@@ -487,9 +574,9 @@ class Store:
                               ELSE 0 END DESC,
                             score DESC""",
                 [scan_date],
-            ).df()
+).df()
 
-    # --- deep research (DESIGN.md §15) ---------------------------------------
+    # --- deep research ---------------------------------------
     # The research agent writes files only; these methods are called solely by the
     # `tse-scanner research` wrapper (two brief touches) and the API (reads).
 
@@ -500,8 +587,9 @@ class Store:
 
         self.init_schema()
         cols = ["code", "research_date", "status", "verdict", "confidence", "one_liner",
-                "squeeze_killers", "catalysts", "sources", "memo_md", "memo_path", "model",
-                "cost_usd", "num_turns", "duration_s", "error", "started_at", "finished_at", "pid"]
+                "squeeze_killers", "catalysts", "analyst_targets", "sources", "memo_md",
+                "memo_path", "model", "cost_usd", "num_turns", "duration_s", "error",
+                "started_at", "finished_at", "pid"]
         df = pd.DataFrame([{c: row.get(c) for c in cols}])
         with self.connect() as con:
             self._upsert(con, "research", df, ["code", "research_date"])
@@ -518,7 +606,7 @@ class Store:
                 f"""SELECT * FROM research WHERE {where}
                     ORDER BY research_date DESC, started_at DESC LIMIT 1""",
                 params,
-            ).df()
+).df()
 
     def research_verdicts(self) -> "pd.DataFrame":
         """Per-code latest *done* verdict — the web ranked-table join (display-only)."""
@@ -528,7 +616,7 @@ class Store:
                 """SELECT code, research_date, verdict, confidence, one_liner FROM research
                    WHERE status = 'done'
                    QUALIFY ROW_NUMBER() OVER (PARTITION BY code ORDER BY research_date DESC) = 1"""
-            ).df()
+).df()
 
     def summary(self) -> dict:
         """Row counts + freshness — used by the CLI and the web freshness header."""
@@ -543,6 +631,6 @@ class Store:
             }
             row = con.execute(
                 "SELECT max(as_of_date), max(published_date) FROM weekly_margin"
-            ).fetchone()
+).fetchone()
             out["margin_as_of"], out["margin_published"] = row[0], row[1]
             return out

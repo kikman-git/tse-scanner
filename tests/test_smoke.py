@@ -1,7 +1,7 @@
 """Smoke tests — stdlib only, green before any dependency is installed.
 
 They lock the two things the scaffold guarantees today: (1) Params stays in sync with the
-DESIGN.md §10 table, and (2) the lifecycle ladder + CLI shell behave.
+ table, and (2) the lifecycle ladder + CLI shell behave.
 """
 
 import pytest
@@ -12,11 +12,15 @@ from tse_scanner.pipeline import Stage, classify
 
 
 def test_params_match_design_table():
-    # DESIGN.md §10 starting guesses — if these drift, update both places on purpose.
+    # starting guesses — if these drift, update both places on purpose.
     assert PARAMS.credit_ratio_max == 1.0           # 信用倍率 gate
-    assert PARAMS.days_to_cover_min == 5.0
+    assert PARAMS.dtc_pctile_min == 0.90            # fuel = top decile of the day's universe
+    assert PARAMS.days_to_cover_floor == 1.0        # absolute sanity floor
+    assert PARAMS.require_fuel is False             # de-gated ladder (2026-06-12) — fuel ranks, not gates
     assert PARAMS.bb_width_pctile_max == 0.20
     assert PARAMS.volume_surge_mult == 2.0
+    assert PARAMS.sweep_wick_min_frac == 0.50          # sweep trigger: rejection-bar geometry
+    assert 0 < PARAMS.sweep_stop_floor_pct < PARAMS.stop_pct
     assert (PARAMS.baseline_sessions, PARAMS.setup_sessions) == (120, 14)
     assert (PARAMS.target_pct, PARAMS.stop_pct, PARAMS.horizon_sessions) == (0.12, 0.06, 10)
     assert PARAMS.score_weights["fuel"] == max(PARAMS.score_weights.values())  # fuel weighted highest
@@ -31,12 +35,25 @@ def test_stage_ladder_is_ordered_and_actionable():
 @pytest.mark.parametrize("fuel,coil,ign,follow,expected", [
     (False, False, False, False, Stage.NONE),
     (True, False, False, False, Stage.CROWDED),
+    (False, True, False, False, Stage.PRIMED),     # coil alone primes — fuel no longer gates
+    (False, True, True, False, Stage.IGNITING),    # no-fuel breakout acts (cohort A/B fodder)
     (True, True, False, False, Stage.PRIMED),
     (True, True, True, False, Stage.IGNITING),
     (True, True, True, True, Stage.CONFIRMED),
 ])
 def test_classify(fuel, coil, ign, follow, expected):
     assert classify(has_fuel=fuel, is_coiled=coil, has_ignition=ign, has_followthrough=follow) == expected
+
+
+@pytest.mark.parametrize("fuel,coil,ign,follow,expected", [
+    (False, True, False, False, Stage.NONE),       # legacy: no fuel → coil alone goes nowhere
+    (False, True, True, False, Stage.NONE),
+    (True, True, False, False, Stage.PRIMED),
+    (True, True, True, False, Stage.IGNITING),
+])
+def test_classify_legacy_fuel_gate(fuel, coil, ign, follow, expected):
+    assert classify(has_fuel=fuel, is_coiled=coil, has_ignition=ign,
+                    has_followthrough=follow, require_fuel=True) == expected
 
 
 def test_cli_parser_has_all_subcommands():
@@ -59,7 +76,7 @@ def test_rescan_always_refreshes():
 
 
 @pytest.mark.parametrize("env, src, expect", [
-    ("paid", None, "jquants"),       # the user's .env value — bare ingest/rescan must hit V2
+    ("paid", None, "jquants"),       # the user's.env value — bare ingest/rescan must hit V2
     ("jquants", None, "jquants"),    # canonical token
     ("free", None, "free"),          # default free path
     ("paid", "free", "free"),        # explicit --source free overrides the env

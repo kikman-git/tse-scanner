@@ -38,7 +38,9 @@ your reply. Every fact needs a URL and a date. ≤800 words. Numbers exactly as 
 
 1. **`bear-case.md`** — Why are shorts short {code}? Check fund-level short positions
    (`https://karauri.net/{code}/` — names, sizes, recent changes), recent negative news /
-   analyst actions / sector pressure (`https://kabutan.jp/stock/news?code={code}`, web search).
+   analyst actions — incl. **named broker rating changes** both directions (house, old→new
+   rating, old→new target price) via 株探 (`https://kabutan.jp/stock/news?code={code}`) and
+   トレーダーズ・ウェブ; sector pressure (web search "{code} レーティング 格上げ OR 格下げ").
    Reconstruct the most plausible short thesis and report evidence for whether it is intact,
    weakening, or broken.
 2. **`dilution.md`** — Squeeze-killers for {code}: any 公募増資 / 第三者割当 / MSワラント / CB /
@@ -48,14 +50,21 @@ your reply. Every fact needs a URL and a date. ≤800 words. Numbers exactly as 
 3. **`catalysts.md`** — Catalyst calendar for {code}: next 決算発表日 (kabutan stock page
    `https://kabutan.jp/stock/?code={code}` shows it; also company IR calendar), guidance
    revision history (serial raiser/misser?), 大量保有報告書 (5%) filings and activist presence
-   (`https://irbank.net/{code}/holder`), buyback programs, index events, TOB chatter.
+   (`https://irbank.net/{code}/holder`), buyback programs, index events, TOB chatter, and
+   **recent/expected broker rating actions** (格上げ + target-price hikes naming the house — an
+   upgrade with a TP above the box is squeeze fuel; web search "{code} 目標株価 引き上げ").
 4. **`fundamentals.md`** — Trajectory + valuation + float for {code}: revenue/OP trend and last
    quarter vs plan (`https://irbank.net/{code}` or kabutan 業績), PER/PBR now vs own history,
-   major holders / cross-holdings / treasury stock (how tight is the real float?).
+   major holders / cross-holdings / treasury stock (how tight is the real float?). Also the
+   **analyst target-price cluster** — min / median / max, how many houses, named houses where
+   shown (みんかぶ アナリストコンセンサス `https://minkabu.jp/stock/{code}`, 株探); quote each TP
+   as published with its source. This cluster is the **exit-ceiling reference** for memo §7/§8 —
+   report it, never manufacture one.
 
 Source discipline (DESIGN.md §5): prefer official publishers (TDnet, JPX, EDINET, company IR);
-kabutan / irbank / karauri are fine as **single-page reads for this one name** — this is the
-human-eyeball tier, not a bulk feed. If a page is JS-walled or blocked, fall back to web search;
+kabutan / irbank / karauri / みんかぶ / トレーダーズ・ウェブ are fine as **single-page reads for
+this one name** — this is the human-eyeball tier, not a bulk feed. If a page is JS-walled or
+blocked, fall back to web search;
 do not fight it.
 
 ## memo.md — write exactly these sections
@@ -70,8 +79,8 @@ do not fight it.
 ## 4. Catalyst calendar      (dated list; flag anything inside the next ~10 sessions loudly)
 ## 5. Float & holders        (is the float as tight as the margin tape implies?)
 ## 6. Fundamental trajectory (earnings momentum: with the longs or the shorts?)
-## 7. Valuation headroom     (room above the box, vs own history/peers — not a price target)
-## 8. Trade implications     (explicit: hold-through-target? exit mechanically? size down? why)
+## 7. Valuation headroom     (room above the box vs own history/peers; cite the published analyst target-price cluster as the exit-ceiling reference — don't manufacture your own target)
+## 8. Trade implications     (explicit: hold-through-target, or trim into the analyst TP cluster? exit mechanically? size down? why)
 ## 9. Sources                (every URL used)
 ```
 
@@ -85,9 +94,14 @@ do not fight it.
   "bear_thesis": "intact | weakening | broken | unclear",
   "squeeze_killers": ["short strings; [] if none found"],
   "catalysts": [{"date": "YYYY-MM-DD or null", "event": "決算 2Q", "inside_horizon": true}],
+  "analyst_targets": [{"house": "野村 / 大和 / … or コンセンサス(平均|高値|安値)", "target": 4200, "rating": "Buy or null", "date": "YYYY-MM-DD or null"}],
   "sources": ["https://…"]
 }
 ```
+
+`analyst_targets` = the published broker target-price cluster from the §fundamentals collector (the
+exit-ceiling reference for §7/§8) — named houses and/or みんかぶ consensus aggregates, sorted highest
+first by the UI; `[]` if none found. Never invent a target; only list published ones.
 
 Verdict semantics: **SUPPORTS** = fundamentals add reasons the squeeze can run / shorts must
 cover (broken bear thesis, upward revisions, buyback, no dilution risk). **NEUTRAL** = no

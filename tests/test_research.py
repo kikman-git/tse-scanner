@@ -1,4 +1,4 @@
-"""Deep-research wrapper tests (DESIGN.md §15) — run against a FAKE `claude` binary.
+"""Deep-research wrapper tests — run against a FAKE `claude` binary.
 
 The wrapper's job is lifecycle bookkeeping: build the pack, spawn the agent, enforce rails,
 parse artifacts, own the DuckDB row. None of that needs a real (expensive) agent run, so the
@@ -25,6 +25,7 @@ out = re.search(r"out=(\\S+)", " ".join(sys.argv)).group(1)
 verdict = {"verdict": "SUPPORTS", "confidence": "high", "one_liner": "bear thesis broken",
            "bear_thesis": "broken", "squeeze_killers": [],
            "catalysts": [{"date": "2026-06-20", "event": "1Q決算", "inside_horizon": True}],
+           "analyst_targets": [{"house": "野村", "target": 4200, "rating": "Buy", "date": "2026-05-30"}],
            "sources": ["https://example.com/a"]}
 open(out + "/verdict.json", "w").write(json.dumps(verdict, ensure_ascii=False))
 open(out + "/memo.md", "w").write("# 9999 TEST — deep research\\n\\nmemo body")
@@ -83,6 +84,7 @@ def test_run_research_done_roundtrip(tmp_path):
     assert row["status"] == "done" and row["verdict"] == "SUPPORTS"
     assert "memo body" in row["memo_md"]
     assert json.loads(row["catalysts"])[0]["event"] == "1Q決算"
+    assert json.loads(row["analyst_targets"])[0]["target"] == 4200
     # artifacts on disk: pack written by wrapper, memo/verdict by the (fake) agent
     run_dir = Path(row["memo_path"]).parent
     assert (run_dir / "pack.md").exists() and (run_dir / "verdict.json").exists()

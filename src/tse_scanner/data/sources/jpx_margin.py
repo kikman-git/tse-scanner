@@ -1,4 +1,4 @@
-"""Free per-issue weekly margin (信用取引残高) from JPX published PDFs (DESIGN.md §3.1, §5).
+"""Free per-issue weekly margin (信用取引残高) from JPX published PDFs.
 
 Source: JPX 銘柄別信用取引週末残高 (free) → ``syumatsu<date>NN.pdf``. `extract_tables()` is useless
 (no ruled borders), but `extract_text()` yields regular rows. One data row:
@@ -6,9 +6,9 @@ Source: JPX 銘柄別信用取引週末残高 (free) → ``syumatsu<date>NN.pdf`
     B 極洋 普通株式 13010 JP3257200000 2,800 ▲ 1,300 132,400 13,400 0 ▲ 100 2,800 ▲ 1,200 42,100 1,200 90,300 12,200
     ^   ^name ^type  ^code5 ^ISIN      └─ 12 numeric cols: short,Δ, long,Δ, [一般売,Δ 制度売,Δ  一般買,Δ 制度買,Δ] ─┘
     │
-    └ flag: 'B' = 貸借銘柄 (loan-marginable) — doubles as the DESIGN.md §5 universe gate.
+    └ flag: 'B' = 貸借銘柄 (loan-marginable) — doubles as the universe gate.
 
-The header carries BOTH the as-of (申込み現在) and publication date → free §6.1 lag handling.
+The header carries BOTH the as-of (申込み現在) and publication date → free lag handling.
 PDF parsing is fragile by nature; `parse_margin_line` is pure (unit-tested) and we validate that
 short_total == 一般売 + 制度売.  TODO: capture 増担保/規制 prefix markers (e.g. '*') if present.
 """
@@ -73,7 +73,7 @@ def parse_margin_line(line: str) -> dict | None:
 
 
 def parse_dates(pdf_path: str | Path) -> tuple[date | None, date | None]:
-    """(as_of 申込み現在, published) from the PDF header — the DESIGN.md §6.1 lag, for free."""
+    """(as_of 申込み現在, published) from the PDF header — the lag, for free."""
     import pdfplumber
 
     with pdfplumber.open(pdf_path) as pdf:
@@ -81,7 +81,7 @@ def parse_dates(pdf_path: str | Path) -> tuple[date | None, date | None]:
     ds = [date(int(y), int(m), int(d)) for y, m, d in _DATE.findall(head)]
     if not ds:
         return None, None
-    # as-of (申込み現在, Fri) is the earliest header date; publication (Tue) is the latest (§6.1).
+    # as-of (申込み現在, Fri) is the earliest header date; publication (Tue) is the latest.
     return min(ds), (max(ds) if len(set(ds)) > 1 else None)
 
 

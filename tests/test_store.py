@@ -1,7 +1,7 @@
 """Store tests — the publication-date point-in-time read is the project's load-bearing invariant.
 
 Friday's margin is published the following Tue–Wed; a read as-of a date strictly before the
-publication date must NOT see that print (DESIGN.md §6.1). These tests need DuckDB (installed).
+publication date must NOT see that print. These tests need DuckDB (installed).
 """
 
 import subprocess

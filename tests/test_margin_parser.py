@@ -10,7 +10,7 @@ def test_parses_taishaku_row():
     assert r["code"] == "1301" and r["code5"] == "13010"
     assert r["is_taishaku"] is True
     assert r["short_total"] == 2800 and r["long_total"] == 132400
-    # breakdown consistency: 一般売 + 制度売 == 売残合計 ; same for 買
+    # breakdown consistency: 一般売 + 制度売 == 売残合計; same for 買
     assert r["neg_short"] + r["sys_short"] == r["short_total"]
     assert r["neg_long"] + r["sys_long"] == r["long_total"]
 

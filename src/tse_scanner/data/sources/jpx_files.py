@@ -1,4 +1,4 @@
-"""Discover & download JPX's free published statistics files (DESIGN.md §5).
+"""Discover & download JPX's free published statistics files.
 
 The attachment URLs carry a rotating hash segment (…/tvdivq0000001rnl-att/…), so we scrape the
 listing page for the *current* link rather than hard-coding it. Polite, low-frequency use only:

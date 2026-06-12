@@ -81,6 +81,7 @@ export interface ResearchRow {
   one_liner: string | null;
   squeeze_killers: string | null; // JSON array (text)
   catalysts: string | null;       // JSON array of {date, event, inside_horizon} (text)
+  analyst_targets: string | null; // JSON array of {house, target, rating, date} (text)
   sources: string | null;         // JSON array (text)
   memo_md: string | null;
   model: string | null;
@@ -107,4 +108,55 @@ export interface Summary {
   scans: number;
   margin_as_of: string | null;
   margin_published: string | null;
+}
+
+export interface PlaybookPayload {
+  markdown: string;
+  mtime: number;
+  updated: string; // YYYY-MM-DD of the file's last edit
+}
+
+// --- jobs (GET /jobs, /jobs/log) — long-running batch visibility ---
+
+export interface JobProgress {
+  done: number;
+  total: number;
+  pct: number | null;
+  events?: number;   // backtest replays report a running event count
+  detail: string;    // the raw progress line
+}
+
+export interface Job {
+  id: string;        // log path relative to data/ — pass to /jobs/log?id=
+  label: string;
+  kind: "backtest" | "ingest" | "research" | "service" | "batch";
+  running: boolean;
+  status: "running" | "done" | "failed" | "idle";
+  progress: JobProgress | null;
+  last_line: string;
+  mtime: number;     // unix seconds
+  age_s: number;
+  size: number;      // bytes
+  pids: number[];
+}
+
+export interface JobProcess {
+  pid: number;
+  elapsed_s: number;
+  cmd: string;
+  kind: string;
+}
+
+export interface JobsPayload {
+  jobs: Job[];
+  processes: JobProcess[];
+  ts: number;
+}
+
+export interface JobLogPayload {
+  id: string;
+  lines: string[];
+  size: number;
+  mtime: number;
+  running: boolean;
 }

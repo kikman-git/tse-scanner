@@ -1,4 +1,4 @@
-"""Free daily adjusted OHLCV via Yahoo Finance / yfinance (DESIGN.md §5).
+"""Free daily adjusted OHLCV via Yahoo Finance / yfinance.
 
 TSE code ``7203`` → Yahoo symbol ``7203.T``. (Stooq's free CSV is now behind a JS proof-of-work
 anti-bot wall, so we use Yahoo, which works.) For the backtest, prefer storing once into DuckDB and

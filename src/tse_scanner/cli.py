@@ -3,15 +3,15 @@
 A stdlib-only `argparse` shell so the skeleton runs *today* (`tse-scanner --help`,
 `python -m tse_scanner --help`) before any dependency is installed — heavy imports (pandas, duckdb,
 yfinance) live *inside* the handlers, never at module top. Each subcommand maps to a build phase
-(DESIGN.md §9):
+:
 
     ingest    Phase 0  — free pull (JPX universe + weekly margin + Yahoo OHLCV) → DuckDB store
     universe  Phase 0  — build the point-in-time 貸借銘柄 tradeable universe
     scan      Phase 2  — run the lifecycle pipeline, bucket by stage, score, persist
     backtest  Phase 1  — point-in-time event study with first-touch labels (GO/NO-GO)
-    research  §15      — on-demand deep fundamental memo for one ticker (headless claude run)
+    research       — on-demand deep fundamental memo for one ticker (headless claude run)
 
-The view layer is the FastAPI service (tse_scanner.api) + Next.js app in web/ (PLAN.md Track A).
+The view layer is the FastAPI service (tse_scanner.api) + Next.js app in web/.
 """
 
 from __future__ import annotations
@@ -29,8 +29,8 @@ def _resolve_source(args: argparse.Namespace) -> str:
     """Resolve the ingest source to canonical 'jquants' | 'free'.
 
     --source wins; otherwise TSE_DATA_SOURCE decides (so the bare `rescan`/`ingest` the web
-    再スキャン button spawns follows the .env switch — PLAN.md Track B §4). 'paid' and 'jquants'
-    are aliases for the J-Quants V2 (Standard) path; the user's .env uses TSE_DATA_SOURCE=paid,
+    再スキャン button spawns follows the.env switch). 'paid' and 'jquants'
+    are aliases for the J-Quants V2 (Standard) path; the user's.env uses TSE_DATA_SOURCE=paid,
     so it must NOT silently fall through to the free JPX+Yahoo path.
     """
     source = getattr(args, "source", None) or load_settings().data_source
@@ -121,7 +121,17 @@ def _ingest_jquants(args: argparse.Namespace) -> int:
           f"+{res['topix_rows']} TOPIX sessions ({store.settings.duckdb_path})")
     if args.no_prices:
         print("  prices: skipped (--no-prices)")
-    print("  next: `tse-scanner scan`, then `tse-scanner backtest` (the §10 GO/NO-GO).")
+    if getattr(args, "fins", False):
+        from tse_scanner.data.jquants_sync import sync_fins
+
+        print("  fins: syncing 決算短信サマリー + 業績予想修正 (/fins/summary)…")
+        try:
+            fres = sync_fins(store, client, limit=args.limit)
+        except Exception as e:  # noqa: BLE001
+            print(f"  fins sync failed: {e}")
+            return 1
+        print(f"  → store: {fres['fins_codes']} codes pulled (+{fres['fins_rows']} disclosure rows)")
+    print("  next: `tse-scanner scan`, then `tse-scanner backtest` (the GO/NO-GO).")
     return 0
 
 
@@ -164,13 +174,15 @@ def _scan(_: argparse.Namespace) -> int:
     top = res.table.head(15)
     cols = ["code", "name", "stage", "score", "fuel", "coil", "ignition", "days_to_cover", "credit_ratio"]
     print(top[[c for c in cols if c in top.columns]].to_string(index=False))
-    print("  → written to scan_results. View in the web UI (tse-web, :3002).")
+    print("  → written to scan_results. View in the web UI (tse-web,:3002).")
     return 0
 
 
 def _backtest(args: argparse.Namespace) -> int:
     from tse_scanner.backtest.event_study import run_event_study
     from tse_scanner.data.store import Store
+
+    from datetime import date as _date
 
     cadence = getattr(args, "cadence", "daily")
     print("backtest — point-in-time event study with first-touch labels (the GO/NO-GO gate).")
@@ -184,8 +196,12 @@ def _backtest(args: argparse.Namespace) -> int:
         print("  no published margin in store — run `tse-scanner ingest` first.")
         return 1
     start, end = row[0], row[1]
+    if getattr(args, "start", None):
+        start = _date.fromisoformat(args.start)
+    if getattr(args, "end", None):
+        end = _date.fromisoformat(args.end)
     clock = "every trading day" if cadence == "daily" else "margin publication dates"
-    print(f"  replaying {clock} in [{start} .. {end}] ({cadence} cadence) …", flush=True)
+    print(f"  replaying {clock} in [{start}.. {end}] ({cadence} cadence) …", flush=True)
     res = run_event_study(start, end, PARAMS, store,
                           progress=lambda m: print(m, flush=True), cadence=cadence)
     print(f"  events: {res.n_events}   labels: {res.label_counts}")
@@ -198,6 +214,8 @@ def _backtest(args: argparse.Namespace) -> int:
             wr = f"{c['win_rate']:.1%}" if c["win_rate"] == c["win_rate"] else "n/a"
             er = f"{c['expectancy_r']:+.2f}R" if c["expectancy_r"] == c["expectancy_r"] else "n/a"
             print(f"  split · {name}: n={c['n']}  win-rate {wr}  expectancy {er}")
+        if res.events_path:
+            print(f"  events → {res.events_path}  (per-event records; re-slice cohorts offline)")
     print(f"  note: {res.note}")
     return 0
 
@@ -208,7 +226,7 @@ def _research(args: argparse.Namespace) -> int:
 
     s = load_settings()
     code = str(args.code)
-    print(f"research {code} — deep fundamental memo (DESIGN.md §15).")
+    print(f"research {code} — deep fundamental memo.")
     print(f"  model: {s.research_model} (collectors: sonnet)   "
           f"caps: {s.research_max_turns} turns / {s.research_timeout_s // 60} min")
     print("  this spawns a headless claude run with web search — typically 5–12 minutes…")
@@ -253,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
         ("scan", _scan, "bucket the universe by lifecycle stage (Phase 2)"),
         ("backtest", _backtest, "run the point-in-time event study / GO-NO-GO (Phase 1)"),
         ("rescan", _rescan, "ingest (forced --refresh) + scan in one shot (the web 再スキャン button)"),
-        ("research", _research, "deep fundamental memo for one ticker via headless claude (§15)"),
+        ("research", _research, "deep fundamental memo for one ticker via headless claude"),
     ]:
         sp = sub.add_parser(name, help=help_)
         if name == "research":
@@ -265,6 +283,10 @@ def build_parser() -> argparse.ArgumentParser:
                             help="replay clock: daily = every trading day (representative — "
                                  "ignition is a daily breakout); weekly = margin publication dates "
                                  "(fast but under-samples ignition). Default: daily.")
+            sp.add_argument("--start", default=None, metavar="YYYY-MM-DD",
+                            help="replay window start (default: first published margin print)")
+            sp.add_argument("--end", default=None, metavar="YYYY-MM-DD",
+                            help="replay window end (default: last published margin print)")
         if name in ("ingest", "rescan"):
             sp.add_argument("--source", choices=["free", "jquants", "paid"], default=None,
                             help="free = JPX files + Yahoo; jquants/paid = V2 sync "
@@ -277,6 +299,9 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Yahoo OHLCV period to pull (default 1y; need ≥120 sessions)")
             sp.add_argument("--no-prices", action="store_true", help="ingest universe + margin only")
             sp.add_argument("--refresh", action="store_true", help="re-download JPX files even if cached")
+            sp.add_argument("--fins", action="store_true",
+                            help="also sync /fins/summary (決算+業績予想修正 — the revision setup; "
+                                 "jquants source only; first run ≈ 4k calls)")
         sp.set_defaults(func=fn)
         if name == "rescan":
             sp.set_defaults(refresh=True)  # always pull the fresh weekly print — that's the point

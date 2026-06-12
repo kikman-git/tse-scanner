@@ -1,8 +1,8 @@
-"""Scan orchestrator — run the lifecycle pipeline over the universe (Phase 2 — DESIGN.md §2, §7).
+"""Scan orchestrator — run the lifecycle pipeline over the universe (Phase 2).
 
 Composes the point-in-time inputs into one ranked table:
 
-    universe (§5)  →  fuel (§3.1) + coil (§3.2) + ignition (§3.3)  →  stage (§2)  →  score (§7)
+    universe  →  fuel + coil + ignition  →  stage  →  score
 
 Gate-by-stage then a transparent within-stage weighted score (fuel weighted highest). All margin
 reads are publication-date point-in-time (the store enforces it); `CONFIRMED` requires the *next*
@@ -13,7 +13,7 @@ scan assigns is `IGNITING`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 from tse_scanner.config import PARAMS, Params
@@ -63,19 +63,34 @@ def run_scan(as_of: date | None = None, params: Params = PARAMS,
         empty = pd.DataFrame()
         return ScanResult(scan_date=as_of, table=empty, counts={})
 
-    prices = store.all_prices(uni["code"].tolist(), as_of)
+    # Signals read at most (baseline_sessions + 60) ≈ 180 *sessions*; a 2-calendar-year lower
+    # bound covers that with ~2× headroom even through holiday runs and halts, and spares each
+    # replay date from re-reading the full 10y price history (the backtest's I/O bottleneck).
+    # Side benefit: a delist→relist name (e.g. 8303, 2023→2025) no longer bridges its listing gap
+    # into the volatility baseline — "this name's normal" stays within the current price regime.
+    prices = store.all_prices(uni["code"].tolist(), as_of, start=as_of - timedelta(days=730))
     # Cap each code's slice to the longest signal lookback. bb_width_percentile only ranks the
     # tail(baseline_sessions) of the rolling-BB(20) widths; box/ATR/volume are tail(≤20). So the
     # last (baseline_sessions + 60) sessions reproduce every signal **identically** while sparing
-    # coil/ignition from chewing each name's full 10y history per scan (the §10 backtest's cost).
+    # coil/ignition from chewing each name's full 10y history per scan (the backtest's cost).
     lookback = params.baseline_sessions + 60
     by_code = {c: g.set_index("date").tail(lookback) for c, g in prices.groupby("code")} \
         if not prices.empty else {}
     # Batched once (was a per-code query inside the loop — ~1.6k connects, the scan's bottleneck).
     trends = store.margin_trends(uni["code"].tolist(), as_of, params.short_balance_trend_prints)
 
+    # Cross-sectional fuel pre-pass: days-to-cover percentile is ranked against *today's whole
+    # universe* (one cross-section per scan date — point-in-time by construction).
+    dtc_all = pd.Series(
+        [fuel_mod.days_to_cover(
+            float(s) if pd.notna(s) else 0.0,
+            float(a) if pd.notna(a) else 0.0)
+         for s, a in zip(uni["short_total"], uni["adv_shares"])],
+        index=uni.index, dtype=float)
+    dtc_pctiles = fuel_mod.dtc_percentile_ranks(dtc_all).tolist()
+
     rows: list[dict] = []
-    for r in uni.itertuples(index=False):
+    for i, r in enumerate(uni.itertuples(index=False)):
         ohlc = by_code.get(r.code)
         if ohlc is None or len(ohlc) < _MIN_BARS:
             continue
@@ -84,12 +99,13 @@ def run_scan(as_of: date | None = None, params: Params = PARAMS,
             short_balance=float(r.short_total) if pd.notna(r.short_total) else 0.0,
             long_balance=float(r.long_total) if pd.notna(r.long_total) else 0.0,
             adv=float(r.adv_shares) if pd.notna(r.adv_shares) else 0.0,
+            dtc_pctile=dtc_pctiles[i],
             rising=fuel_mod.short_balance_rising(
                 trends.get(r.code), params.short_balance_trend_prints
-            ),
-            gyaku_hibu=False,  # 逆日歩 booster is Phase 4 (JSF) — DESIGN.md §4
+),
+            gyaku_hibu=False,  # 逆日歩 booster is Phase 4 (JSF) —
             params=params,
-        )
+)
         coil = coil_mod.assess(ohlc, params)
         ign = ign_mod.assess(ohlc, coil.box_high, coil.box_low, params)
 
@@ -97,8 +113,9 @@ def run_scan(as_of: date | None = None, params: Params = PARAMS,
             has_fuel=fuel.has_fuel,
             is_coiled=coil.is_coiled,
             has_ignition=ign.type is not ign_mod.Ignition.NONE,
-            has_followthrough=False,  # 売残-drop is next-print, lagging — not knowable live (§2)
-        )
+            has_followthrough=False,  # 売残-drop is next-print, lagging — not knowable live
+            require_fuel=params.require_fuel,
+)
 
         w = params.score_weights
         coil_c = _coil_component(coil.bb_width_pct)
@@ -114,11 +131,16 @@ def run_scan(as_of: date | None = None, params: Params = PARAMS,
             "fuel": round(float(fuel.score), 4),
             "coil": round(float(coil_c), 4),
             "ignition": ign.type.value,
+            "has_fuel": bool(fuel.has_fuel),
             "days_to_cover": round(fuel.days_to_cover, 2) if fuel.days_to_cover == fuel.days_to_cover else None,
+            "dtc_pctile": round(fuel.dtc_pctile, 4) if fuel.dtc_pctile == fuel.dtc_pctile else None,
             "credit_ratio": round(fuel.credit_ratio, 4) if fuel.credit_ratio < 1e9 else None,
             "short_total": int(r.short_total) if pd.notna(r.short_total) else None,
             "long_total": int(r.long_total) if pd.notna(r.long_total) else None,
             "bb_width_pct": round(coil.bb_width_pct, 4) if coil.bb_width_pct == coil.bb_width_pct else None,
+            "box_height_atr": (round(coil.box_height_atr, 2)
+                               if coil.box_height_atr == coil.box_height_atr
+                               and coil.box_height_atr != float("inf") else None),
             "box_high": round(coil.box_high, 2),
             "box_low": round(coil.box_low, 2),
             "last_close": round(float(r.last_close), 2),
@@ -131,7 +153,7 @@ def run_scan(as_of: date | None = None, params: Params = PARAMS,
         return ScanResult(scan_date=as_of, table=pd.DataFrame(), counts={})
 
     table = pd.DataFrame(rows)
-    # gate-by-stage, then within-stage score (DESIGN.md §7)
+    # gate-by-stage, then within-stage score
     stage_rank = {s.name: int(s) for s in Stage}
     table["_stage_rank"] = table["stage"].map(stage_rank)
     table = table.sort_values(["_stage_rank", "score"], ascending=[False, False]).drop(columns="_stage_rank")

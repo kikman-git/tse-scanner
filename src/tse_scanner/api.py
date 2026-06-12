@@ -1,4 +1,4 @@
-"""FastAPI view layer over the Store (PLAN.md Track A — DESIGN.md §8, §14).
+"""FastAPI view layer over the Store.
 
 Presentation split: the entire Python core (store/signals/backtest/research) stays; this API is
 a thin, read-mostly skin for the Next.js front-end (`web/`). Loopback-only by deployment
@@ -14,10 +14,12 @@ collisions).
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
 from datetime import date
+from pathlib import Path
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Response
@@ -32,7 +34,7 @@ app = FastAPI(title="tse-scanner API", version="1")
 # would mean two registries and duplicate idempotency state).
 _procs: dict = {"rescan": None, "rescan_started": 0.0, "rescan_failed": None, "research": {}}
 
-_RUNNING_STALE_S = 20 * 60  # 'running' research row older than this = crashed run (DESIGN.md §15)
+_RUNNING_STALE_S = 20 * 60  # 'running' research row older than this = crashed run
 
 
 def _store() -> Store:
@@ -79,7 +81,7 @@ def summary() -> dict:
 
 @app.get("/scan")
 def scan(scan_date: str | None = None) -> dict:
-    """Latest scan table + the freshness header fields (§6.1 lag made visible)."""
+    """Latest scan table + the freshness header fields (lag made visible)."""
     store = _store()
     df = store.read_scan(pd.to_datetime(scan_date).date() if scan_date else None)
     if df.empty:
@@ -121,7 +123,7 @@ def research_verdicts() -> dict:
 
 
 def _research_alive(raw: "pd.Series") -> bool:
-    """Is a 'running' research row backed by a live wrapper process? (DESIGN.md §15)
+    """Is a 'running' research row backed by a live wrapper process?
 
     Two guards, both required to read 'running':
       - age: a legit run can't outlast the wrapper's timeout; past `_RUNNING_STALE_S` it is a
@@ -150,7 +152,7 @@ def _research_alive(raw: "pd.Series") -> bool:
 @app.get("/research/{code}")
 def research(code: str) -> dict:
     """Latest research row for `code` + derived state for the panel's 4 states
-    (none / running / failed / done — DESIGN.md §15). A 'running' row whose process is dead or
+    (none / running / failed / done). A 'running' row whose process is dead or
     past the staleness window is reported as failed."""
     df = _store().latest_research(code)
     if df.empty:
@@ -215,9 +217,188 @@ def rescan_status() -> dict:
     }
 
 
+# --- jobs: visibility into the long-running batch work --------------------------------------------
+# Jobs are *discovered*, not registered: every batch process already writes a log under data/
+# (the API's own spawns, CLI runs from a shell, chained background replays). The list below is
+# therefore complete by construction — anything that logs shows up, whoever started it.
+
+_JOB_FRESH_S = 150          # log written this recently = running even without a matched process
+_LOG_TAIL_BYTES = 64 * 1024  # read at most this much from the file end per request
+
+# replay 360/731 (trading day 2024-11-26) — 43 events so far
+_RE_REPLAY = re.compile(r"replay (\d+)/(\d+)")
+_RE_EVENTS = re.compile(r"—\s*(\d+) events")
+# fins: 1200/4000 codes … | bars: 100/2900 new codes … | margin: 26/507 weeks …
+_RE_STEP = re.compile(r"(?:fins|bars|margin):\s*(\d+)/(\d+)")
+_RE_FAILED = re.compile(r"traceback \(most recent|failed|error:", re.IGNORECASE)
+_RE_BACKTEST_DONE = re.compile(r"^\s*events:\s*\d+")
+
+
+def _job_kind(name: str) -> str:
+    if name.startswith("backtest"):
+        return "backtest"
+    if name.startswith(("rescan", "ingest", "jquants")):
+        return "ingest"
+    if name.startswith(("api", "web")):
+        return "service"
+    return "batch"
+
+
+def _tail_lines(path: Path, max_lines: int) -> list[str]:
+    """Last `max_lines` of a log, reading only the file's tail (logs grow to MBs)."""
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            f.seek(max(0, size - _LOG_TAIL_BYTES))
+            chunk = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return []
+    lines = chunk.splitlines()
+    if size > _LOG_TAIL_BYTES and lines:
+        lines = lines[1:]  # first line is almost surely clipped mid-way
+    return lines[-max_lines:]
+
+
+def _parse_progress(lines: list[str]) -> tuple[dict | None, str | None]:
+    """(progress, terminal_state_hint) from a log tail. Hint: 'done' | 'failed' | None."""
+    progress = None
+    hint = None
+    for ln in lines:
+        m = _RE_REPLAY.search(ln)
+        if not m:
+            m2 = _RE_STEP.search(ln)
+            if m2:
+                done, total = int(m2.group(1)), int(m2.group(2))
+                progress = {"done": done, "total": total,
+                            "pct": round(100.0 * done / total, 1) if total else None,
+                            "detail": ln.strip()}
+            continue
+        done, total = int(m.group(1)), int(m.group(2))
+        progress = {"done": done, "total": total,
+                    "pct": round(100.0 * done / total, 1) if total else None,
+                    "detail": ln.strip()}
+        ev = _RE_EVENTS.search(ln)
+        if ev:
+            progress["events"] = int(ev.group(1))
+    for ln in lines:
+        if _RE_BACKTEST_DONE.match(ln):
+            hint = "done"
+        elif _RE_FAILED.search(ln):
+            # keep scanning — a later success line (e.g. a finished study) outranks a mid-log error
+            hint = hint or "failed"
+    return progress, hint
+
+
+def _batch_processes() -> list[dict]:
+    """Live tse-scanner batch processes (any spawner), via one `ps` pass. Excludes this API."""
+    try:
+        out = subprocess.run(["ps", "-eo", "pid,etimes,args", "--no-headers"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    procs = []
+    for ln in out.splitlines():
+        parts = ln.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid, etimes, cmd = parts
+        if ("tse_scanner" not in cmd and "tse-scanner" not in cmd) or "api:app" in cmd:
+            continue
+        if cmd.startswith(("ps ", "grep ")) or " -eo " in cmd:
+            continue
+        kind = "batch"
+        for kw, k in (("backtest", "backtest"), ("rescan", "ingest"),
+                      ("ingest", "ingest"), ("research", "research")):
+            if kw in cmd:
+                kind = k
+                break
+        procs.append({"pid": int(pid), "elapsed_s": int(etimes), "cmd": cmd[:200], "kind": kind})
+    return procs
+
+
+def _list_jobs() -> dict:
+    data_dir = REPO_ROOT / "data"
+    procs = _batch_processes()
+    live_kinds = {p["kind"] for p in procs}
+    now = time.time()
+
+    paths = sorted(data_dir.glob("*.log")) + sorted(data_dir.glob("research/*/cli.log"))
+    jobs = []
+    for p in paths:
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        rel = p.relative_to(data_dir).as_posix()
+        name = rel[:-len(".log")].replace("/", "·")
+        kind = "research" if rel.startswith("research/") else _job_kind(p.name)
+        lines = _tail_lines(p, 40)
+        progress, hint = _parse_progress(lines)
+        age = now - st.st_mtime
+        running = age <= _JOB_FRESH_S
+        jobs.append({
+            "id": rel, "label": name, "kind": kind,
+            "running": running, "status": "running" if running else (hint or "idle"),
+            "progress": progress,
+            "last_line": (lines[-1].strip()[:200] if lines else ""),
+            "mtime": st.st_mtime, "age_s": round(age), "size": st.st_size,
+            "pids": [],
+        })
+
+    # A live process marks the freshest log of its kind running even between sparse progress
+    # prints (a 10y daily replay can go ~25 min between lines — mtime alone would read 'idle').
+    for kind in live_kinds:
+        cand = [j for j in jobs if j["kind"] == kind and j["status"] != "done"]
+        if not cand:
+            continue
+        newest = max(cand, key=lambda j: j["mtime"])
+        newest["running"] = True
+        newest["status"] = "running"
+        newest["pids"] = [p["pid"] for p in procs if p["kind"] == kind]
+
+    jobs.sort(key=lambda j: (not j["running"], j["kind"] == "service", -j["mtime"]))
+    return {"jobs": jobs, "processes": procs, "ts": now}
+
+
+@app.get("/jobs")
+def jobs() -> dict:
+    return _list_jobs()
+
+
+@app.get("/jobs/log")
+def job_log(id: str, tail: int = 400) -> dict:
+    """Tail one job log. `id` is the path relative to data/ as listed by /jobs — re-validated
+    here (resolved path must stay inside data/ and end in .log; no traversal)."""
+    data_dir = (REPO_ROOT / "data").resolve()
+    try:
+        path = (data_dir / id).resolve()
+    except OSError:
+        raise HTTPException(422, "bad id")
+    if not path.is_relative_to(data_dir) or path.suffix != ".log":
+        raise HTTPException(422, "id must be a .log under data/")
+    if not path.exists():
+        raise HTTPException(404, f"no such log: {id}")
+    st = path.stat()
+    lines = _tail_lines(path, max(1, min(int(tail), 2000)))
+    return {"id": id, "lines": lines, "size": st.st_size, "mtime": st.st_mtime,
+            "running": (time.time() - st.st_mtime) <= _JOB_FRESH_S}
+
+
+@app.get("/playbook")
+def playbook() -> dict:
+    """PLAYBOOK.md verbatim — the web Playbook tab renders it, so edits to the file ship to the
+    UI without a rebuild. The markdown file stays the single source of truth."""
+    p = REPO_ROOT / "PLAYBOOK.md"
+    if not p.exists():
+        raise HTTPException(404, "PLAYBOOK.md not found in the repo root")
+    st = p.stat()
+    return {"markdown": p.read_text(encoding="utf-8"), "mtime": st.st_mtime,
+            "updated": time.strftime("%Y-%m-%d", time.localtime(st.st_mtime))}
+
+
 @app.post("/research/{code}", status_code=202)
 def spawn_research(code: str, response: Response, force: bool = False) -> dict:
-    """Launch `tse-scanner research <code>` detached (the wrapper owns the §15 lifecycle)."""
+    """Launch `tse-scanner research <code>` detached (the wrapper owns the lifecycle)."""
     if not code.isalnum() or not (4 <= len(code) <= 5):
         raise HTTPException(422, "code must be a 4–5 char TSE issue code")
     prev = _procs["research"].get(code)

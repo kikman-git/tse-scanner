@@ -13,6 +13,8 @@ import {
   fetcher, tradingViewUrl, STAGE_ORDER, STAGE_BADGE, VERDICT_EMOJI,
   fmtYen, fmtNum, fmtInt, daysAgo,
 } from "@/lib/api";
+import Nav from "./Nav";
+import Term from "./Term";
 
 const STAGE_LABEL: Record<Stage, string> = {
   IGNITING: "🔴 IGNITING", PRIMED: "🟣 PRIMED", CROWDED: "🟠 CROWDED",
@@ -21,7 +23,7 @@ const STAGE_LABEL: Record<Stage, string> = {
 // Actionable stages on by default; NONE/CONFIRMED are background noise (toggle to reveal).
 const DEFAULT_ON: Stage[] = ["IGNITING", "PRIMED", "CROWDED"];
 
-function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+function Stat({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
   return (
     <div className="metric">
       <div className="label">{label}</div>
@@ -106,18 +108,21 @@ export default function ScanView({ initial, summary }: { initial: ScanPayload; s
 
   return (
     <div className="container">
-      <h1>踏み上げ Scanner</h1>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+        <h1>踏み上げ Scanner</h1>
+        <Nav />
+      </div>
       <div className="subtitle">
         Crowded, trapped shorts + a wound coil → the upside break that runs them.
       </div>
 
       {/* freshness header */}
       <div className="metrics">
-        <Stat label="Scan date" value={payload.scan_date} />
-        <Stat label="信用残 as of (Fri)" value={payload.margin_as_of ?? "—"} />
-        <Stat label="Published" value={payload.margin_published ?? "—"} />
-        <Stat label="Candidates" value={fmtInt(rows.length)} />
-        {summary && <Stat label="Price coverage" value={`${fmtInt(summary.price_codes)} codes`} />}
+        <Stat label={<Term k="scan_date">Scan date</Term>} value={payload.scan_date} />
+        <Stat label={<Term k="margin_asof">信用残 as of (Fri)</Term>} value={payload.margin_as_of ?? "—"} />
+        <Stat label={<Term k="published">Published</Term>} value={payload.margin_published ?? "—"} />
+        <Stat label={<Term k="candidates">Candidates</Term>} value={fmtInt(rows.length)} />
+        {summary && <Stat label={<Term k="price_coverage">Price coverage</Term>} value={`${fmtInt(summary.price_codes)} codes`} />}
       </div>
 
       {/* §6.1 publication-lag caption */}
@@ -168,20 +173,20 @@ export default function ScanView({ initial, summary }: { initial: ScanPayload; s
         <table>
           <thead>
             <tr>
-              <th className="l">Code</th>
-              <th className="l">銘柄</th>
-              <th className="l">Seg</th>
-              <th>Score</th>
-              <th>Fuel</th>
-              <th>Coil</th>
-              <th>DTC</th>
-              <th>信用倍率</th>
-              <th>売残</th>
-              <th>買残</th>
-              <th>BBw</th>
-              <th>終値</th>
-              <th>ADV</th>
-              <th>TV</th>
+              <th className="l"><Term k="code">Code</Term></th>
+              <th className="l"><Term k="name">銘柄</Term></th>
+              <th className="l"><Term k="seg">Seg</Term></th>
+              <th><Term k="score">Score</Term></th>
+              <th><Term k="fuel">Fuel</Term></th>
+              <th><Term k="coil">Coil</Term></th>
+              <th><Term k="dtc">DTC</Term></th>
+              <th><Term k="credit_ratio">信用倍率</Term></th>
+              <th><Term k="short_total">売残</Term></th>
+              <th><Term k="long_total">買残</Term></th>
+              <th><Term k="bbw">BBw</Term></th>
+              <th><Term k="close">終値</Term></th>
+              <th><Term k="adv">ADV</Term></th>
+              <th><Term k="tv">TV</Term></th>
             </tr>
           </thead>
           <tbody>
@@ -212,7 +217,7 @@ function BucketRows({
     <>
       <tr>
         <td className={`l stagecell stage-${stage}`} colSpan={14}>
-          {STAGE_BADGE[stage]} · {rows.length}
+          <Term k={stage}>{STAGE_BADGE[stage]}</Term> · {rows.length}
         </td>
       </tr>
       {rows.map((r) => {

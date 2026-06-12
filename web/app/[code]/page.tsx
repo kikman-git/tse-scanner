@@ -4,6 +4,7 @@ import type { ScanPayload, ScanRow, ResearchPayload, Bar, MarginPrint } from "@/
 import PriceChart from "../components/PriceChart";
 import MarginChart from "../components/MarginChart";
 import ResearchPanel from "../components/ResearchPanel";
+import Term from "../components/Term";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,9 @@ export default async function CodePage({ params }: { params: Promise<{ code: str
           </h1>
           <div className="subtitle" style={{ marginBottom: 0 }}>
             {row ? (
-              <span className={`stage-${row.stage}`} style={{ fontWeight: 600 }}>{STAGE_BADGE[row.stage]}</span>
+              <span className={`stage-${row.stage}`} style={{ fontWeight: 600 }}>
+                <Term k={row.stage}>{STAGE_BADGE[row.stage]}</Term>
+              </span>
             ) : "not in the latest scan"}
             {row?.segment && <span style={{ color: "var(--text-dim)" }}> · {row.segment}</span>}
             {last && <span style={{ color: "var(--text-dim)" }}> · 終値 {fmtInt(last.close)} ({last.date})</span>}
@@ -43,19 +46,19 @@ export default async function CodePage({ params }: { params: Promise<{ code: str
 
       {row && (
         <div className="metrics">
-          <Metric label="Score" value={fmtNum(row.score, 3)} />
-          <Metric label="Fuel" value={fmtNum(row.fuel, 2)} />
-          <Metric label="Coil" value={fmtNum(row.coil, 2)} />
-          <Metric label="Days-to-cover" value={fmtNum(row.days_to_cover, 1)} />
-          <Metric label="信用倍率" value={fmtNum(row.credit_ratio, 2)} />
-          <Metric label="BB width" value={fmtNum(row.bb_width_pct, 2)} />
-          <Metric label="ADV" value={fmtYen(row.adv_yen)} />
+          <Metric label={<Term k="score">Score</Term>} value={fmtNum(row.score, 3)} />
+          <Metric label={<Term k="fuel">Fuel</Term>} value={fmtNum(row.fuel, 2)} />
+          <Metric label={<Term k="coil">Coil</Term>} value={fmtNum(row.coil, 2)} />
+          <Metric label={<Term k="dtc">Days-to-cover</Term>} value={fmtNum(row.days_to_cover, 1)} />
+          <Metric label={<Term k="credit_ratio">信用倍率</Term>} value={fmtNum(row.credit_ratio, 2)} />
+          <Metric label={<Term k="bbw">BB width</Term>} value={fmtNum(row.bb_width_pct, 2)} />
+          <Metric label={<Term k="adv">ADV</Term>} value={fmtYen(row.adv_yen)} />
         </div>
       )}
 
       <div className="chartbox">
         <div className="title">
-          Daily candles · volume · coil box
+          Daily candles · volume · <Term k="box">coil box</Term>
           {(row?.box_low || row?.box_high) && (
             <span style={{ color: "var(--purple)" }}> ({fmtInt(row?.box_low)} – {fmtInt(row?.box_high)})</span>
           )}
@@ -64,7 +67,7 @@ export default async function CodePage({ params }: { params: Promise<{ code: str
       </div>
 
       <div className="chartbox">
-        <div className="title">信用残 (weekly, point-in-time)</div>
+        <div className="title"><Term k="margin_balance">信用残</Term> (weekly, point-in-time)</div>
         <MarginChart prints={margin.prints ?? []} />
       </div>
 
@@ -73,7 +76,7 @@ export default async function CodePage({ params }: { params: Promise<{ code: str
   );
 }
 
-function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+function Metric({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
   return (
     <div className="metric">
       <div className="label">{label}</div>

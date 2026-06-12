@@ -1,4 +1,4 @@
-"""On-demand deep fundamental research per ticker (DESIGN.md §15).
+"""On-demand deep fundamental research per ticker.
 
 The scanner reads positioning + price state; it cannot know *why* shorts are short or whether a
 公募増資 is about to kill the squeeze. This module is the wrapper around one headless `claude -p`
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from tse_scanner.data.store import Store
 
 # Repo root (…/src/tse_scanner/research.py → two levels up) — `claude` must run here so the
-# project-level .claude/ (skill + collector agent) is discovered.
+# project-level.claude/ (skill + collector agent) is discovered.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SKILL_REL = ".claude/skills/deep-research/SKILL.md"
@@ -89,7 +89,7 @@ def build_pack(code: str, store: "Store", params: Params = PARAMS) -> tuple[str,
             f"- 信用売残: {r['short_total']:,.0f}   信用買残: {r['long_total']:,.0f}\n"
             f"- BB-width pct: {r['bb_width_pct']:.2f}   box: {r['box_low']:,.0f}–{r['box_high']:,.0f}"
             f"   last close: {r['last_close']:,.0f}   ADV: ¥{r['adv_yen']:,.0f}\n"
-        )
+)
     else:
         warnings.append("no scan row — researching outside the scanner's candidate set")
 
@@ -101,7 +101,7 @@ def build_pack(code: str, store: "Store", params: Params = PARAMS) -> tuple[str,
     else:
         warnings.append("no weekly margin history in store")
 
-    try:  # best-effort fundamentals snapshot; yfinance .info is flaky — never fail the pack on it
+    try:  # best-effort fundamentals snapshot; yfinance.info is flaky — never fail the pack on it
         import yfinance as yf
 
         info = yf.Ticker(f"{code}.T").info or {}
@@ -116,11 +116,11 @@ def build_pack(code: str, store: "Store", params: Params = PARAMS) -> tuple[str,
         warnings.append(f"yfinance snapshot unavailable ({type(e).__name__})")
 
     parts.append(
-        "## Trade mechanics this memo must serve (DESIGN.md §6)\n"
+        "## Trade mechanics this memo must serve\n"
         f"- Long-only squeeze entry on ignition; first-touch barriers: target +{params.target_pct:.0%}, "
         f"stop -{params.stop_pct:.0%}, horizon {params.horizon_sessions} sessions.\n"
         "- The verdict is a display-only overlay for the human — it never feeds the scan score.\n"
-    )
+)
     if warnings:
         parts.append("## Pack warnings\n" + "\n".join(f"- ⚠️ {w}" for w in warnings) + "\n")
     return "\n".join(parts), warnings
@@ -182,7 +182,7 @@ def run_research(code: str, *, force: bool = False, settings: Settings | None = 
                     verdict=prev.iloc[0]["verdict"], one_liner=prev.iloc[0]["one_liner"],
                     memo_path=prev.iloc[0]["memo_path"],
                     error=f"fresh memo from {prev_date} (< {settings.research_ttl_days}d; --force to re-run)",
-                )
+)
 
     run_dir = (settings.data_dir / "research" / code / today.isoformat()).resolve()
     (run_dir / "raw").mkdir(parents=True, exist_ok=True)
@@ -202,7 +202,7 @@ def run_research(code: str, *, force: bool = False, settings: Settings | None = 
         f"code={code}\npack={pack_path}\nout={run_dir}\n"
         "Follow the skill exactly: delegate ingestion to research-collector subagents, write "
         "memo.md and verdict.json into the out directory, and stop."
-    )
+)
     cmd = [settings.claude_bin, "-p", prompt,
            "--model", settings.research_model,
            "--max-turns", str(settings.research_max_turns),
@@ -252,6 +252,7 @@ def run_research(code: str, *, force: bool = False, settings: Settings | None = 
             "confidence": verdict.get("confidence"), "one_liner": verdict.get("one_liner"),
             "squeeze_killers": json.dumps(verdict.get("squeeze_killers", []), ensure_ascii=False),
             "catalysts": json.dumps(verdict.get("catalysts", []), ensure_ascii=False),
+            "analyst_targets": json.dumps(verdict.get("analyst_targets", []), ensure_ascii=False),
             "sources": json.dumps(verdict.get("sources", []), ensure_ascii=False),
             "memo_md": memo_md,
         })

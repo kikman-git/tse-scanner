@@ -10,6 +10,7 @@ import useSWR from "swr";
 import ReactMarkdown from "react-markdown";
 import type { ResearchPayload, ResearchRow } from "@/lib/types";
 import { fetcher, VERDICT_BADGE } from "@/lib/api";
+import Term from "./Term";
 
 function parseList(s: string | null): unknown[] {
   if (!s) return [];
@@ -38,7 +39,7 @@ export default function ResearchPanel({ code, initial }: { code: string; initial
   return (
     <div className="chartbox">
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <div className="title" style={{ margin: 0 }}>Deep research</div>
+        <div className="title" style={{ margin: 0 }}><Term k="research">Deep research</Term></div>
         {(state === "done" || state === "failed") && (
           <button className="secondary" onClick={() => run(true)} disabled={busy}>
             ↻ Force re-run
@@ -80,6 +81,9 @@ export default function ResearchPanel({ code, initial }: { code: string; initial
 function ResearchResult({ row }: { row: ResearchRow }) {
   const killers = parseList(row.squeeze_killers) as string[];
   const catalysts = parseList(row.catalysts) as Array<{ date?: string; event?: string; inside_horizon?: boolean }>;
+  const targets = (parseList(row.analyst_targets) as Array<{ house?: string; target?: number; rating?: string; date?: string }>)
+    .filter((t) => typeof t.target === "number")
+    .sort((a, b) => (b.target ?? 0) - (a.target ?? 0));
   const sources = parseList(row.sources) as Array<string | { url?: string; title?: string }>;
 
   return (
@@ -94,19 +98,38 @@ function ResearchResult({ row }: { row: ResearchRow }) {
 
       {killers.length > 0 && (
         <>
-          <div className="title" style={{ marginTop: 12 }}>Squeeze-killers</div>
+          <div className="title" style={{ marginTop: 12 }}><Term k="squeeze_killers">Squeeze-killers</Term></div>
           <ul style={{ margin: "4px 0" }}>{killers.map((k, i) => <li key={i}>{k}</li>)}</ul>
         </>
       )}
 
       {catalysts.length > 0 && (
         <>
-          <div className="title" style={{ marginTop: 12 }}>Catalysts</div>
+          <div className="title" style={{ marginTop: 12 }}><Term k="catalysts">Catalysts</Term></div>
           <ul style={{ margin: "4px 0" }}>
             {catalysts.map((c, i) => (
               <li key={i}>
                 {c.inside_horizon ? "🎯 " : "· "}
                 <span className="mono">{c.date ?? "—"}</span> {c.event ?? ""}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      {targets.length > 0 && (
+        <>
+          <div className="title" style={{ marginTop: 12 }}>
+            <Term k="analyst_targets">Analyst targets</Term> <span className="caption">· exit ceiling</span>
+          </div>
+          <ul style={{ margin: "4px 0" }}>
+            {targets.map((t, i) => (
+              <li key={i}>
+                {i === 0 ? "⛰️ " : "· "}
+                <span className="mono">¥{(t.target ?? 0).toLocaleString()}</span>
+                {t.house ? ` — ${t.house}` : ""}
+                {t.rating ? ` (${t.rating})` : ""}
+                {t.date ? <span className="caption"> · {t.date}</span> : null}
               </li>
             ))}
           </ul>

@@ -1,4 +1,4 @@
-"""FastAPI view-layer tests (PLAN.md Track A).
+"""FastAPI view-layer tests.
 
 The API is a thin skin over Store: reads must be JSON-safe (NaN→null, dates→ISO) and the two
 mutation endpoints use detached-spawn semantics (202 + idempotent; state polled from the store /
@@ -152,3 +152,80 @@ def test_research_spawn_validates_code(client, monkeypatch):
     monkeypatch.setattr(api_mod.subprocess, "Popen", lambda *a, **k: _FakeProc())
     assert client.post("/research/9755").status_code == 202
     assert client.post("/research/not-a-code").status_code == 422
+
+
+# --- jobs ------------------------------------------------------------------------------------------
+
+def _age(path, seconds=3600):
+    t = api_mod.time.time() - seconds
+    os.utime(path, (t, t))
+
+
+def test_jobs_discovery_progress_and_status(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(api_mod, "_batch_processes", lambda: [])
+    d = tmp_path / "data"
+    d.mkdir(exist_ok=True)
+    running = d / "backtest_daily_10y.log"
+    running.write_text("backtest …\n  replay 360/731 (trading day 2024-11-26) — 43 events so far\n")
+    done = d / "backtest_daily_3y.log"
+    done.write_text("  replay 731/731 (trading day 2026-06-09) — 88 events so far\n"
+                    "  events: 88   labels: {'win': 30}\n  win-rate: 34.1%\n")
+    _age(done)
+    failed = d / "rescan.log"
+    failed.write_text("ingest --source jquants …\n  sync failed: 403 from API\n")
+    _age(failed)
+    (d / "research" / "9755").mkdir(parents=True)
+    research = d / "research" / "9755" / "cli.log"
+    research.write_text("research 9755 — deep fundamental memo.\n")
+    _age(research)
+
+    j = {job["id"]: job for job in client.get("/jobs").json()["jobs"]}
+    assert j["backtest_daily_10y.log"]["running"] is True          # fresh mtime
+    p = j["backtest_daily_10y.log"]["progress"]
+    assert p["done"] == 360 and p["total"] == 731 and p["events"] == 43
+    assert p["pct"] == pytest.approx(49.2, abs=0.1)
+    assert j["backtest_daily_3y.log"]["status"] == "done"          # terminal summary printed
+    assert j["rescan.log"]["status"] == "failed"
+    assert j["research/9755/cli.log"]["kind"] == "research"
+    assert client.get("/jobs").json()["jobs"][0]["running"] is True  # running sorts first
+
+
+def test_jobs_live_process_marks_stale_log_running(client, monkeypatch, tmp_path):
+    # a 10y daily replay prints ~every 25 min — mtime alone would read 'idle' between lines
+    monkeypatch.setattr(api_mod, "_batch_processes", lambda: [
+        {"pid": 4242, "elapsed_s": 1200, "cmd": "tse-scanner backtest --cadence daily", "kind": "backtest"},
+    ])
+    d = tmp_path / "data"
+    d.mkdir(exist_ok=True)
+    log = d / "backtest_daily_10y.log"
+    log.write_text("  replay 100/2434 (trading day 2016-12-01) — 0 events so far\n")
+    _age(log, seconds=1500)  # 25 min since the last progress print
+
+    j = {job["id"]: job for job in client.get("/jobs").json()["jobs"]}
+    assert j["backtest_daily_10y.log"]["running"] is True
+    assert j["backtest_daily_10y.log"]["pids"] == [4242]
+
+
+def test_job_log_tail_and_path_safety(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(api_mod, "_batch_processes", lambda: [])
+    d = tmp_path / "data"
+    d.mkdir(exist_ok=True)
+    (d / "backtest.log").write_text("\n".join(f"line {i}" for i in range(50)) + "\n")
+    j = client.get("/jobs/log", params={"id": "backtest.log", "tail": 2}).json()
+    assert j["lines"] == ["line 48", "line 49"]
+    (tmp_path / "secret.log").write_text("outside data dir\n")
+    assert client.get("/jobs/log", params={"id": "../secret.log"}).status_code == 422
+    assert client.get("/jobs/log", params={"id": "missing.log"}).status_code == 404
+    assert client.get("/jobs/log", params={"id": "backtest.txt"}).status_code == 422
+
+
+def test_playbook_serves_markdown(client, tmp_path):
+    r = client.get("/playbook")
+    assert r.status_code == 404              # fixture repo root has no PLAYBOOK.md yet
+
+    (tmp_path / "PLAYBOOK.md").write_text("# TSE Trading Playbook\n\n## Glossary\n", encoding="utf-8")
+    r = client.get("/playbook")
+    assert r.status_code == 200
+    body = r.json()
+    assert "TSE Trading Playbook" in body["markdown"]
+    assert body["mtime"] > 0

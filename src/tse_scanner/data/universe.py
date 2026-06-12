@@ -1,4 +1,4 @@
-"""Universe builder (Phase 0 — DESIGN.md §5).
+"""Universe builder (Phase 0).
 
 Point-in-time, survivorship-free tradeable universe. As-of any date, a name is in the universe iff:
   - **貸借銘柄** (loan-marginable) — *thesis requirement*; 逆日歩 and the 制度信用 short-trap exist
@@ -9,7 +9,7 @@ Point-in-time, survivorship-free tradeable universe. As-of any date, a name is i
 "Point-in-time" is the whole game: membership must be reconstructed from listed/eligibility history
 as it was *on that date*. The **free** path gives only the current eligibility snapshot (no per-day
 history), so de-listed / de-margined names are *not* reconstructable for free — that survivorship
-caveat (DESIGN.md §6, §12) is surfaced, not hidden, and is resolved only by the paid J-Quants
+caveat is surfaced, not hidden, and is resolved only by the paid J-Quants
 `listed/info` history. The publication-date margin read here is fully point-in-time regardless.
 """
 
@@ -30,7 +30,7 @@ def build_universe(as_of: date, params: Params = PARAMS, store: "Store | None" =
     """Return the set of codes tradeable as-of `as_of`, keyed by code.
 
     Joins the eligibility snapshot (listed_info) + publication-date margin + price gates from the
-    store, applies the §5 gates, and returns one row per surviving code with the fields the scan
+    store, applies the gates, and returns one row per surviving code with the fields the scan
     needs (margin balances, ADV, last close, eligibility, margin dates).
     """
     import pandas as pd
@@ -50,15 +50,15 @@ def build_universe(as_of: date, params: Params = PARAMS, store: "Store | None" =
         mcols = ["code", "short_total", "long_total", "is_taishaku",
                  "as_of_date", "published_date"]
         df = df.merge(margin[mcols], on="code", how="left", suffixes=("", "_mg"))
-        # prefer the margin file's B-flag (authoritative §5 gate) over the listed snapshot.
+        # prefer the margin file's B-flag (authoritative gate) over the listed snapshot.
         # Cast to the nullable boolean dtype first so the NA-fill chain stays on a boolean
         # dtype and avoids pandas' object-downcast FutureWarning (fires once per replay date).
         df["is_taishaku"] = (
             df["is_taishaku_mg"].astype("boolean")
-            .fillna(df["is_taishaku"].astype("boolean"))
-            .fillna(False)
-            .astype(bool)
-        )
+.fillna(df["is_taishaku"].astype("boolean"))
+.fillna(False)
+.astype(bool)
+)
         df = df.drop(columns=[c for c in df.columns if c.endswith("_mg")])
     else:
         df["short_total"] = pd.NA
@@ -73,7 +73,7 @@ def build_universe(as_of: date, params: Params = PARAMS, store: "Store | None" =
     gates &= df["last_close"].fillna(0) >= params.min_price_yen
     gates &= df["adv_yen"].fillna(0) >= params.turnover_floor_yen
     gates &= df["n_sessions"].fillna(0) >= params.baseline_sessions
-    # Point-in-time delisting guard: with deep history (Track B), a name delisted mid-window keeps
+    # Point-in-time delisting guard: with deep history, a name delisted mid-window keeps
     # stale prices + a stale margin print forever; require a recent bar or it leaves the universe.
     staleness = (pd.Timestamp(as_of) - pd.to_datetime(df["last_date"])).dt.days
     gates &= staleness.fillna(10**6) <= params.max_price_staleness_days
