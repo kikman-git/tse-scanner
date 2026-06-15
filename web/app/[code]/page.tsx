@@ -21,6 +21,7 @@ export default async function CodePage({ params }: { params: Promise<{ code: str
   const row: ScanRow | undefined = scan?.rows.find((r) => r.code === code);
   const bars = prices.bars ?? [];
   const last = bars[bars.length - 1];
+  const analystTp = research.state === "done" ? consensusTp(research.row?.analyst_targets ?? null) : null;
 
   return (
     <div className="container">
@@ -62,9 +63,33 @@ export default async function CodePage({ params }: { params: Promise<{ code: str
           {(row?.box_low || row?.box_high) && (
             <span style={{ color: "var(--purple)" }}> ({fmtInt(row?.box_low)} – {fmtInt(row?.box_high)})</span>
           )}
+          {analystTp != null && (
+            <span style={{ color: "var(--orange)" }}> · <Term k="analyst_targets">analyst TP</Term> {fmtInt(analystTp)}</span>
+          )}
         </div>
-        <PriceChart bars={bars} boxHigh={row?.box_high} boxLow={row?.box_low} />
+        <PriceChart bars={bars} boxHigh={row?.box_high} boxLow={row?.box_low} t1={row?.t1} t2={row?.t2} analystTp={analystTp} />
       </div>
+
+      {row?.t1 != null && (
+        <div className="chartbox">
+          <div className="title">
+            <Term k="exit_map">Technical exit map</Term>{" "}
+            <span className="caption">· price-structure ceilings — reconcile with the analyst cluster below</span>
+          </div>
+          <div className="metrics" style={{ marginTop: 8 }}>
+            <Metric label={<Term k="t1">T1 · measured move</Term>}
+                    value={<>{fmtInt(row.t1)}{pctFrom(row.t1, row.last_close)}</>} />
+            <Metric label="T2 · stretch"
+                    value={<>{fmtInt(row.t2)}{pctFrom(row.t2, row.last_close)}</>} />
+            <Metric label="Stop · box low" value={fmtInt(row.box_low)} />
+            <Metric label={<Term k="rr">R:R at T1</Term>} value={fmtNum(row.rr_t1, 1)} />
+            <Metric label="Next resistance" value={fmtInt(row.next_resistance)} />
+            <Metric label="52w high" value={fmtInt(row.high_52w)} />
+            <Metric label={<Term k="blue_sky">青天井</Term>}
+                    value={row.blue_sky ? "YES — trail, don't cap" : "no"} />
+          </div>
+        </div>
+      )}
 
       <div className="chartbox">
         <div className="title"><Term k="margin_balance">信用残</Term> (weekly, point-in-time)</div>
@@ -82,5 +107,36 @@ function Metric({ label, value }: { label: React.ReactNode; value: React.ReactNo
       <div className="label">{label}</div>
       <div className="value">{value}</div>
     </div>
+  );
+}
+
+/** One number from the memo's analyst TP cluster — the chart line wants a consensus, not a fan
+ * of five. An explicit コンセンサス(平均) row wins; else the mean of the published targets with
+ * the 高値/安値 aggregate rows dropped (they'd double-count the extremes around the mean). */
+function consensusTp(json: string | null): number | null {
+  if (!json) return null;
+  let rows: Array<{ house?: string; target?: number }>;
+  try {
+    const v = JSON.parse(json);
+    rows = Array.isArray(v) ? v : [];
+  } catch { return null; }
+  const valid = rows.filter((r) => typeof r.target === "number" && r.target! > 0);
+  if (!valid.length) return null;
+  const isHiLo = (h?: string) => /高値|安値/.test(h ?? "");
+  const avg = valid.find((r) => /平均|コンセンサス|consensus|average/i.test(r.house ?? "") && !isHiLo(r.house));
+  if (avg) return Math.round(avg.target!);
+  const pool = valid.filter((r) => !isHiLo(r.house));
+  const use = pool.length ? pool : valid;
+  return Math.round(use.reduce((a, r) => a + r.target!, 0) / use.length);
+}
+
+/** "+13.0%" suffix for a target vs the last close — null-safe. */
+function pctFrom(target: number | null, close: number | null): React.ReactNode {
+  if (target == null || close == null || close <= 0) return null;
+  const v = (target / close - 1) * 100;
+  return (
+    <span className="caption" style={{ marginLeft: 4 }}>
+      {v >= 0 ? "+" : ""}{v.toFixed(1)}%
+    </span>
   );
 }

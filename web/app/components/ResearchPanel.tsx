@@ -78,8 +78,18 @@ export default function ResearchPanel({ code, initial }: { code: string; initial
   );
 }
 
+const SECTOR_BADGE: Record<string, string> = {
+  tailwind: "🌊 sector tailwind", neutral: "〰️ sector neutral", headwind: "🪨 sector headwind",
+};
+
+function parseSectorView(s: string | null): { trend?: string; one_liner?: string } | null {
+  if (!s) return null;
+  try { const v = JSON.parse(s); return v && typeof v === "object" ? v : null; } catch { return null; }
+}
+
 function ResearchResult({ row }: { row: ResearchRow }) {
   const killers = parseList(row.squeeze_killers) as string[];
+  const sector = parseSectorView(row.sector_view);
   const catalysts = parseList(row.catalysts) as Array<{ date?: string; event?: string; inside_horizon?: boolean }>;
   const targets = (parseList(row.analyst_targets) as Array<{ house?: string; target?: number; rating?: string; date?: string }>)
     .filter((t) => typeof t.target === "number")
@@ -95,6 +105,13 @@ function ResearchResult({ row }: { row: ResearchRow }) {
         </div>
       )}
       {row.one_liner && <p style={{ marginTop: 6 }}>{row.one_liner}</p>}
+
+      {sector?.trend && (
+        <p className="caption" style={{ marginTop: 4 }}>
+          <Term k="sector_view">{SECTOR_BADGE[sector.trend] ?? `sector ${sector.trend}`}</Term>
+          {sector.one_liner ? <> — {sector.one_liner}</> : null}
+        </p>
+      )}
 
       {killers.length > 0 && (
         <>

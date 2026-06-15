@@ -58,6 +58,124 @@ class ResearchResult:
 
 # --- context pack -----------------------------------------------------------------------------
 
+_SECTOR_RS_SESSIONS = 20     # ~1 month — the sympathy/relative-strength window
+_SECTOR_RS_BAND = 0.02       # peer median vs TOPIX beyond ±2% = tailwind / headwind
+
+
+def _fmt(v, nd: int = 0) -> str:
+    return "—" if v is None or v != v else f"{v:,.{nd}f}"
+
+
+def _exit_map_block(code: str, scan_row, store: "Store", params: Params) -> str | None:
+    """The technical exit map — price-structure targets as the counterweight to the analyst
+    target-price cluster. Prefers the scan's persisted numbers (what the UI shows); recomputes
+    from bars only when the row predates the exit-map columns or the name was never scanned."""
+    from tse_scanner.signals import coil as coil_mod
+    from tse_scanner.signals import targets as tgt_mod
+
+    vals: dict = {}
+    if scan_row is not None and scan_row.get("t1") is not None and scan_row.get("t1") == scan_row.get("t1"):
+        vals = {k: scan_row.get(k) for k in
+                ("t1", "t2", "atr", "rr_t1", "next_resistance", "high_52w", "blue_sky",
+                 "box_high", "box_low", "last_close")}
+        entry_ref = max(vals["last_close"] or 0, vals["box_high"] or 0)
+        stop_ref = vals["box_low"]
+    else:
+        bars = store.prices(code, start=date.today() - timedelta(days=730))
+        if bars is None or len(bars) < 30:
+            return None
+        ohlc = bars.tail(params.exit_swing_lookback + 10)
+        c = coil_mod.assess(ohlc, params)
+        em = tgt_mod.compute(ohlc, c.box_high, c.box_low, params)
+        vals = {"t1": em.t1, "t2": em.t2, "atr": em.atr, "rr_t1": em.rr_t1,
+                "next_resistance": em.resistances[0] if em.resistances else None,
+                "high_52w": em.high_52w, "blue_sky": em.blue_sky,
+                "box_high": c.box_high, "box_low": c.box_low,
+                "last_close": float(ohlc["close"].iloc[-1])}
+        entry_ref, stop_ref = em.entry_ref, em.stop_ref
+
+    if not entry_ref or entry_ref != entry_ref or entry_ref <= 0:
+        return None
+    pct = lambda t: f"{(t / entry_ref - 1):+.1%}" if t and t == t else "—"  # noqa: E731
+    return (
+        "## Technical exit map (computed from price structure — ground truth, like the scanner state)\n"
+        f"- entry ref: {_fmt(entry_ref)}   structural stop: {_fmt(stop_ref)} (box low)   "
+        f"R:R at T1: {_fmt(vals.get('rr_t1'), 1)}\n"
+        f"- T1 (box measured move, 節目-snapped): {_fmt(vals.get('t1'))} ({pct(vals.get('t1'))})   "
+        f"T2 (stretch): {_fmt(vals.get('t2'))} ({pct(vals.get('t2'))})\n"
+        f"- next overhead supply: {_fmt(vals.get('next_resistance'))}   "
+        f"52w high: {_fmt(vals.get('high_52w'))}   "
+        f"blue sky (no overhead supply): {'YES — trail, don’t cap' if vals.get('blue_sky') else 'no'}\n"
+        f"- ATR(14): {_fmt(vals.get('atr'), 1)}   backtest barrier for comparison: "
+        f"+{params.target_pct:.0%} / −{params.stop_pct:.0%} / {params.horizon_sessions} sessions\n"
+        "- Memo §Valuation/§Trade must reconcile this map with the published analyst cluster: "
+        "whichever ceiling is *lower* binds first; analyst TPs **below** T1 = expect supply early.\n"
+    )
+
+
+def _sector_block(code: str, listed, scan, store: "Store") -> str | None:
+    """Computed sector & sympathy context — squeezes cluster by theme, so peers' state frames
+    the single name. Numbers only (33業種 peers from the universe, stages from today's scan,
+    relative strength vs TOPIX); collectors verify the narrative *why*."""
+    import pandas as pd
+
+    if listed is None or listed.empty or "sector33" not in listed.columns:
+        return None
+    me = listed[listed["code"] == code]
+    if not len(me):
+        return None
+    sector = me.iloc[0].get("sector33")
+    if sector is None or sector != sector or not str(sector).strip():
+        return None
+    peers = listed[(listed["sector33"] == sector) & (listed["code"] != code)]["code"].tolist()
+    if not peers:
+        return None
+
+    lines = [f"## Sector context (computed — 33業種: {sector})"]
+    in_scan = scan[scan["code"].isin(peers)] if scan is not None and not scan.empty else None
+    rs_codes = [code]
+    if in_scan is not None and len(in_scan):
+        stages = in_scan["stage"].value_counts().to_dict()
+        active = " · ".join(f"{s} {n}" for s, n in stages.items() if s != "NONE")
+        lines.append(f"- peers in today's universe: {len(in_scan)}"
+                     + (f" — stages: {active}" if active else " — none beyond NONE"))
+        if "has_fuel" in in_scan.columns:
+            n_fuel = int(in_scan["has_fuel"].fillna(False).sum())
+            lines.append(f"- crowded-short peers (fuel gate on): {n_fuel}/{len(in_scan)}"
+                         + (" → sympathy-squeeze backdrop" if n_fuel >= 2 else ""))
+        rs_codes += in_scan["code"].tolist()
+
+    # Relative strength: median peer return vs TOPIX over the sympathy window.
+    n = _SECTOR_RS_SESSIONS
+    px = store.all_prices(rs_codes, start=date.today() - timedelta(days=90))
+    rets: dict[str, float] = {}
+    if px is not None and not px.empty:
+        for c, g in px.sort_values("date").groupby("code"):
+            cl = g["close"].tail(n + 1)
+            if len(cl) == n + 1 and cl.iloc[0] > 0:
+                rets[c] = float(cl.iloc[-1] / cl.iloc[0] - 1)
+    peer_rets = pd.Series([v for k, v in rets.items() if k != code], dtype=float)
+    tpx = store.topix(start=date.today() - timedelta(days=90))
+    tpx_ret = None
+    if tpx is not None and len(tpx) > n:
+        cl = tpx["close"].tail(n + 1)
+        tpx_ret = float(cl.iloc[-1] / cl.iloc[0] - 1)
+    if len(peer_rets) and tpx_ret is not None:
+        med = float(peer_rets.median())
+        own = rets.get(code)
+        diff = med - tpx_ret
+        trend = ("sector tailwind" if diff >= _SECTOR_RS_BAND
+                 else "sector headwind" if diff <= -_SECTOR_RS_BAND else "sector neutral")
+        lines.append(
+            f"- {n}-session returns: peers median {med:+.1%} ({len(peer_rets)} names)"
+            + (f" · {code} itself {own:+.1%}" if own is not None else "")
+            + f" · TOPIX {tpx_ret:+.1%} → **{trend}**")
+    lines.append("- Squeezes cluster by theme: peers also squeezing/breaking out supports "
+                 "follow-through; a lone breakout against a falling sector argues for the "
+                 "mechanical exit. Verify the narrative (sector news/theme) via collectors.")
+    return "\n".join(lines) + "\n"
+
+
 def build_pack(code: str, store: "Store", params: Params = PARAMS) -> tuple[str, list[str]]:
     """Serialize what the store already knows about `code` into a markdown pack.
 
@@ -93,6 +211,25 @@ def build_pack(code: str, store: "Store", params: Params = PARAMS) -> tuple[str,
     else:
         warnings.append("no scan row — researching outside the scanner's candidate set")
 
+    scan_row = row.iloc[0] if row is not None and len(row) else None
+    try:  # best-effort blocks below: a research memo without them still beats no memo
+        em = _exit_map_block(code, scan_row, store, params)
+        if em:
+            parts.append(em)
+        else:
+            warnings.append("technical exit map unavailable (not enough bars)")
+    except Exception as e:  # noqa: BLE001
+        warnings.append(f"technical exit map unavailable ({type(e).__name__})")
+
+    try:
+        sec = _sector_block(code, listed, scan, store)
+        if sec:
+            parts.append(sec)
+        else:
+            warnings.append("sector context unavailable (no sector33/peers in store)")
+    except Exception as e:  # noqa: BLE001
+        warnings.append(f"sector context unavailable ({type(e).__name__})")
+
     mh = store.margin_history(code, prints=12)
     if mh is not None and len(mh):
         cols = ["as_of_date", "published_date", "short_total", "long_total"]
@@ -119,6 +256,8 @@ def build_pack(code: str, store: "Store", params: Params = PARAMS) -> tuple[str,
         "## Trade mechanics this memo must serve\n"
         f"- Long-only squeeze entry on ignition; first-touch barriers: target +{params.target_pct:.0%}, "
         f"stop -{params.stop_pct:.0%}, horizon {params.horizon_sessions} sessions.\n"
+        "- Exits are two ceilings: the technical exit map above (price structure) and the published "
+        "analyst TP cluster (fundamentals) — the memo reconciles them; the lower one binds first.\n"
         "- The verdict is a display-only overlay for the human — it never feeds the scan score.\n"
 )
     if warnings:
@@ -253,6 +392,8 @@ def run_research(code: str, *, force: bool = False, settings: Settings | None = 
             "squeeze_killers": json.dumps(verdict.get("squeeze_killers", []), ensure_ascii=False),
             "catalysts": json.dumps(verdict.get("catalysts", []), ensure_ascii=False),
             "analyst_targets": json.dumps(verdict.get("analyst_targets", []), ensure_ascii=False),
+            "sector_view": (json.dumps(verdict["sector_view"], ensure_ascii=False)
+                            if verdict.get("sector_view") else None),
             "sources": json.dumps(verdict.get("sources", []), ensure_ascii=False),
             "memo_md": memo_md,
         })

@@ -42,7 +42,10 @@ your reply. Every fact needs a URL and a date. ≤800 words. Numbers exactly as 
    rating, old→new target price) via 株探 (`https://kabutan.jp/stock/news?code={code}`) and
    トレーダーズ・ウェブ; sector pressure (web search "{code} レーティング 格上げ OR 格下げ").
    Reconstruct the most plausible short thesis and report evidence for whether it is intact,
-   weakening, or broken.
+   weakening, or broken. **Sector & sympathy:** the pack's computed sector block is ground
+   truth for the *numbers* (peer stages, relative strength vs TOPIX); your job is the *why* —
+   what theme/news is driving the 33業種 sector's recent direction, and are peers squeezing or
+   breaking out too (sympathy) or is {code} moving alone against its sector?
 2. **`dilution.md`** — Squeeze-killers for {code}: any 公募増資 / 第三者割当 / MSワラント / CB /
    新株予約権 / shelf registration, recent or rumored; cash position vs burn (does this company
    *need* money?); recent TDnet capital-action disclosures (`https://irbank.net/{code}/news`,
@@ -58,8 +61,9 @@ your reply. Every fact needs a URL and a date. ≤800 words. Numbers exactly as 
    major holders / cross-holdings / treasury stock (how tight is the real float?). Also the
    **analyst target-price cluster** — min / median / max, how many houses, named houses where
    shown (みんかぶ アナリストコンセンサス `https://minkabu.jp/stock/{code}`, 株探); quote each TP
-   as published with its source. This cluster is the **exit-ceiling reference** for memo §7/§8 —
-   report it, never manufacture one.
+   as published with its source. This cluster is the **exit-ceiling reference** for memo §8/§9 —
+   report it, never manufacture one. (The *technical* ceiling — T1/T2, overhead supply — is
+   already computed in the pack; do not re-derive price levels from charts.)
 
 Source discipline (DESIGN.md §5): prefer official publishers (TDnet, JPX, EDINET, company IR);
 kabutan / irbank / karauri / みんかぶ / トレーダーズ・ウェブ are fine as **single-page reads for
@@ -79,9 +83,10 @@ do not fight it.
 ## 4. Catalyst calendar      (dated list; flag anything inside the next ~10 sessions loudly)
 ## 5. Float & holders        (is the float as tight as the margin tape implies?)
 ## 6. Fundamental trajectory (earnings momentum: with the longs or the shorts?)
-## 7. Valuation headroom     (room above the box vs own history/peers; cite the published analyst target-price cluster as the exit-ceiling reference — don't manufacture your own target)
-## 8. Trade implications     (explicit: hold-through-target, or trim into the analyst TP cluster? exit mechanically? size down? why)
-## 9. Sources                (every URL used)
+## 7. Sector & sympathy      (the pack's computed numbers + the narrative why: sector theme/news, peers squeezing too or {code} alone against the tape?)
+## 8. Valuation headroom     (room above the box vs own history/peers; cite the published analyst target-price cluster as the exit-ceiling reference — don't manufacture your own target — and RECONCILE it with the pack's technical exit map: which ceiling is lower, the analyst cluster or T1/T2?)
+## 9. Trade implications     (explicit: hold-through-target, trim into the analyst TP cluster, or sell the technical T1/T2 — whichever binds first? exit mechanically? size down? why. Blue-sky names: no overhead supply — the trail rule, not a cap)
+## 10. Sources               (every URL used)
 ```
 
 ## verdict.json — exact schema
@@ -95,13 +100,19 @@ do not fight it.
   "squeeze_killers": ["short strings; [] if none found"],
   "catalysts": [{"date": "YYYY-MM-DD or null", "event": "決算 2Q", "inside_horizon": true}],
   "analyst_targets": [{"house": "野村 / 大和 / … or コンセンサス(平均|高値|安値)", "target": 4200, "rating": "Buy or null", "date": "YYYY-MM-DD or null"}],
+  "sector_view": {"trend": "tailwind | neutral | headwind", "one_liner": "≤100 chars — sector theme + sympathy in one sentence"},
   "sources": ["https://…"]
 }
 ```
 
 `analyst_targets` = the published broker target-price cluster from the §fundamentals collector (the
-exit-ceiling reference for §7/§8) — named houses and/or みんかぶ consensus aggregates, sorted highest
-first by the UI; `[]` if none found. Never invent a target; only list published ones.
+exit-ceiling reference for §8/§9) — named houses and/or みんかぶ consensus aggregates, sorted highest
+first by the UI; `[]` if none found. Never invent a target; only list published ones. The technical
+T1/T2 come from the pack (scanner-computed) — they are NOT yours to output here.
+
+`sector_view` = your §7 conclusion: start from the pack's computed relative strength (don't
+contradict the numbers), adjust only if the narrative clearly leads/lags them, and say why in the
+one-liner. `null` if you could not assess the sector.
 
 Verdict semantics: **SUPPORTS** = fundamentals add reasons the squeeze can run / shorts must
 cover (broken bear thesis, upward revisions, buyback, no dilution risk). **NEUTRAL** = no

@@ -1,7 +1,9 @@
 "use client";
 
 // Daily candles + volume + the coil box (box_high / box_low as dashed price lines) — the
-// consolidation the squeeze breaks out of. lightweight-charts v5 (addSeries(SeriesDef, opts)).
+// consolidation the squeeze breaks out of — plus the technical exit targets T1/T2 (dotted)
+// and, when a research memo exists, the analyst consensus TP (orange) so both exit ceilings
+// sit on one chart. lightweight-charts v5 (addSeries(SeriesDef, opts)).
 
 import { useEffect, useRef } from "react";
 import {
@@ -12,8 +14,11 @@ import type { Bar } from "@/lib/types";
 import { useTheme, chartTheme } from "@/lib/theme";
 
 export default function PriceChart({
-  bars, boxHigh, boxLow, height = 360,
-}: { bars: Bar[]; boxHigh?: number | null; boxLow?: number | null; height?: number }) {
+  bars, boxHigh, boxLow, t1, t2, analystTp, height = 360,
+}: {
+  bars: Bar[]; boxHigh?: number | null; boxLow?: number | null;
+  t1?: number | null; t2?: number | null; analystTp?: number | null; height?: number;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const theme = useTheme(); // re-create the chart on theme flip (deps below)
 
@@ -45,10 +50,16 @@ export default function PriceChart({
       candles.createPriceLine({ price: boxHigh, color: c.purple, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "box high" });
     if (boxLow)
       candles.createPriceLine({ price: boxLow, color: c.purple, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "box low" });
+    if (t1)
+      candles.createPriceLine({ price: t1, color: c.up, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: "T1" });
+    if (t2)
+      candles.createPriceLine({ price: t2, color: c.up, lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: true, title: "T2" });
+    if (analystTp)
+      candles.createPriceLine({ price: analystTp, color: c.orange, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "analyst TP" });
 
     chart.timeScale().fitContent();
     return () => chart.remove();
-  }, [bars, boxHigh, boxLow, theme]);
+  }, [bars, boxHigh, boxLow, t1, t2, analystTp, theme]);
 
   if (bars.length === 0)
     return <div className="caption">No price history for this code.</div>;

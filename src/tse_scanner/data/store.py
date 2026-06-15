@@ -14,11 +14,12 @@ Tables:
   listed_info(code, name, segment, segment_ja, sector33, is_domestic_equity, is_taishaku, ingested_at)
   scan_results(scan_date, code, name, segment, stage, score, fuel, coil, ignition,
                has_fuel, days_to_cover, dtc_pctile, credit_ratio, short_total, long_total,
-               bb_width_pct, box_height_atr, box_high, box_low, last_close, adv_yen,
-               margin_as_of, margin_published)
+               bb_width_pct, box_height_atr, box_high, box_low,
+               t1, t2, atr, rr_t1, next_resistance, high_52w, blue_sky,  -- exit map (display-only)
+               last_close, adv_yen, margin_as_of, margin_published)
   research(code, research_date, status, verdict, confidence, one_liner, squeeze_killers,
-           catalysts, analyst_targets, sources, memo_md, memo_path, model, cost_usd, num_turns,
-           duration_s, error, started_at, finished_at, pid)  -- deep-research; agent never writes here
+           catalysts, analyst_targets, sector_view, sources, memo_md, memo_path, model, cost_usd,
+           num_turns, duration_s, error, started_at, finished_at, pid)  -- agent never writes here
 
 NOTE on point-in-time universe: the *free* path (JPX `data_j.xls`) publishes only the **current**
 listed/eligibility snapshot — there is no free per-day eligibility history — so `listed_info` is a
@@ -92,6 +93,13 @@ CREATE TABLE IF NOT EXISTS scan_results (
     bb_width_pct     DOUBLE,
     box_high         DOUBLE,
     box_low          DOUBLE,
+    t1               DOUBLE,             -- technical exit map (signals/targets.py) —
+    t2               DOUBLE,             -- display-only overlay, never a score input
+    atr              DOUBLE,
+    rr_t1            DOUBLE,
+    next_resistance  DOUBLE,
+    high_52w         DOUBLE,
+    blue_sky         BOOLEAN,
     last_close       DOUBLE,
     adv_yen          DOUBLE,
     margin_as_of     DATE,
@@ -133,6 +141,7 @@ CREATE TABLE IF NOT EXISTS research (
     squeeze_killers VARCHAR,           -- JSON array (text)
     catalysts       VARCHAR,           -- JSON array of {date, event} (text)
     analyst_targets VARCHAR,           -- JSON array of {house, target, rating, date} — exit-ceiling cluster
+    sector_view     VARCHAR,           -- JSON {trend: tailwind|neutral|headwind, one_liner} — sector & sympathy
     sources         VARCHAR,           -- JSON array of URLs (text)
     memo_md         VARCHAR,           -- full memo — the web UI renders from here, not the fs
     memo_path       VARCHAR,
@@ -157,6 +166,17 @@ ALTER TABLE research ADD COLUMN IF NOT EXISTS analyst_targets VARCHAR;
 ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS has_fuel BOOLEAN;
 ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS dtc_pctile DOUBLE;
 ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS box_height_atr DOUBLE;
+-- 2026-06-12 technical exit map (signals/targets.py) — display-only overlay for the human's
+-- exits (measured-move T1/T2, ATR, R:R, overhead supply, blue-sky); never a score input.
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS t1 DOUBLE;
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS t2 DOUBLE;
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS atr DOUBLE;
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS rr_t1 DOUBLE;
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS next_resistance DOUBLE;
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS high_52w DOUBLE;
+ALTER TABLE scan_results ADD COLUMN IF NOT EXISTS blue_sky BOOLEAN;
+-- 2026-06-12 sector & sympathy: optional research-verdict overlay (JSON text, display-only).
+ALTER TABLE research ADD COLUMN IF NOT EXISTS sector_view VARCHAR;
 """
 
 
@@ -587,8 +607,8 @@ class Store:
 
         self.init_schema()
         cols = ["code", "research_date", "status", "verdict", "confidence", "one_liner",
-                "squeeze_killers", "catalysts", "analyst_targets", "sources", "memo_md",
-                "memo_path", "model", "cost_usd", "num_turns", "duration_s", "error",
+                "squeeze_killers", "catalysts", "analyst_targets", "sector_view", "sources",
+                "memo_md", "memo_path", "model", "cost_usd", "num_turns", "duration_s", "error",
                 "started_at", "finished_at", "pid"]
         df = pd.DataFrame([{c: row.get(c) for c in cols}])
         with self.connect() as con:

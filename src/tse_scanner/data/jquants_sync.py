@@ -189,14 +189,25 @@ def sync_fins(store: "Store", client: JQuantsClient, *, limit: int | None = None
     progress(f"  fins: {len(todo)} codes to pull ({len(have)} already stored)")
 
     buf: list[pd.DataFrame] = []
+    skipped = 0
     for i, c in enumerate(todo, 1):
-        fs = client.fins_summary(code=f"{c}0")  # 4-digit base → common-stock code5
-        if not fs.empty:
+        # 4-digit base → common-stock code5 (append 0); already-5-char codes (new alphanumeric
+        # tickers) pass through as-is — appending 0 would make an invalid 6-char code.
+        code5 = c if len(str(c)) >= 5 else f"{c}0"
+        try:
+            fs = client.fins_summary(code=code5)
+        except Exception as e:  # noqa: BLE001 — one malformed/unknown code must not abort the backfill
+            skipped += 1
+            if skipped <= 20:
+                progress(f"  fins: skip {c}: {e}")
+            fs = None
+        if fs is not None and not fs.empty:
             buf.append(fs)
         if len(buf) >= _FINS_FLUSH_CODES or (i == len(todo) and buf):
             out["fins_rows"] += store.upsert_fins_summary(pd.concat(buf, ignore_index=True))
             buf = []
         if i % 200 == 0 or i == len(todo):
-            progress(f"  fins: {i}/{len(todo)} codes ({out['fins_rows']} rows)")
+            progress(f"  fins: {i}/{len(todo)} codes ({out['fins_rows']} rows, {skipped} skipped)")
     out["fins_codes"] = len(todo)
+    out["fins_skipped"] = skipped
     return out

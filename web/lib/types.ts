@@ -20,6 +20,14 @@ export interface ScanRow {
   bb_width_pct: number | null;
   box_high: number | null;
   box_low: number | null;
+  // technical exit map (signals/targets.py) — display-only overlay, never a score input
+  t1: number | null;
+  t2: number | null;
+  atr: number | null;
+  rr_t1: number | null;
+  next_resistance: number | null;
+  high_52w: number | null;
+  blue_sky: boolean | null;
   last_close: number | null;
   adv_yen: number | null;
   margin_as_of: string | null;
@@ -82,6 +90,7 @@ export interface ResearchRow {
   squeeze_killers: string | null; // JSON array (text)
   catalysts: string | null;       // JSON array of {date, event, inside_horizon} (text)
   analyst_targets: string | null; // JSON array of {house, target, rating, date} (text)
+  sector_view: string | null;     // JSON {trend: tailwind|neutral|headwind, one_liner} (text)
   sources: string | null;         // JSON array (text)
   memo_md: string | null;
   model: string | null;

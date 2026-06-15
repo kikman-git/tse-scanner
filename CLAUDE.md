@@ -63,6 +63,17 @@ universe and writes `scan_results`.
     vs spring), not an assumption. Short mirror deliberately not built (borrow reality — see
     PLAYBOOK; user is long-mostly).
 
+- **Exit map — "where do I sell?" (display overlay, NOT a signal).** `signals/targets.py`
+  - The *technical* exit ceiling, as the counterweight to the research memo's *fundamental* one
+    (analyst TP cluster): measured-move **T1/T2** off the coil box, **overhead supply** (swing
+    highs + 52w high, **青天井** flag = trail-don't-cap), ATR feasibility vs the 10-session
+    horizon, and **節目 round-number snapping** (TSE sell walls stack at round yen levels).
+  - Computed deterministically in the scan from bars we own — never by the research agent reading
+    TA pages. Persisted on `scan_results` (`t1, t2, atr, rr_t1, next_resistance, high_52w,
+    blue_sky`), drawn on the detail chart, injected into the research pack so memo §8/§9 reconcile
+    the two ceilings (the lower one binds first). **Never feeds stage/score** — same red line as
+    the verdict.
+
 Two lookback windows: **~120 sessions** (baseline = "compressed vs *this name's* normal") and **~14
 sessions** (the active coil + fuel build ≈ 3 weekly margin prints).
 
@@ -102,24 +113,45 @@ are **not scraped** (ToS prohibits bulk automated access/redistribution; their �
 Aggregators (kabutan, IR BANK, karauri, みんかぶ, トレーダーズ・ウェブ) are fine as **single-name,
 human-eyeball reads** — that's the deep-research tier below, not a bulk feed.
 
-## Validation — the GO/NO-GO gate (the one open item)
+## Validation — the GO/NO-GO gate (verdict 2026-06-15: no setup beats TOPIX)
 
-`backtest/event_study.py` + `labels.py`. A **point-in-time event study**: for every historical
-*Igniting* signal, compute the outcome with only data available that day, then aggregate. Success =
-**first-touch triple-barrier** (from entry, within ~10 sessions: +target% first = win, −stop% first
-= loss, else scratch). Starting guesses: **+12% / −6% / 10 sessions** (all tunable; see `config.py`).
+`backtest/event_study.py` (squeeze) · `deadline_study.py` · `revision_study.py`, all over
+`labels.py`. A **point-in-time event study**: for every historical signal compute the outcome with
+only data available that day, then aggregate into **cohort splits** + a per-event parquet for
+offline re-slicing, benchmarking every cohort **vs TOPIX**. Success = **first-touch triple-barrier**
+(from entry, within the setup's horizon: +target% first = win, −stop% first = loss, else scratch);
+starting guesses **+12% / −6% / 10–20 sessions** (tunable; see `config.py`).
 
-**First verdict (2026-06-12): UNTESTABLE at the original gates — n=1 event in 10y.** Not "edge
-dead": the fuel∧coil∧break AND had near-zero base rate. Hence the de-gated ladder: the study now
-runs over *all* coil breakouts and reports **cohort splits** (fuel-gated vs no-fuel, DtC-percentile
-quartiles, spring vs break, 優待クロス proxy) plus a per-event parquet
-(`data/backtest_events_*.parquet`) for offline re-slicing. The A/B question replaces the single
-gate: *do fuel-rich breakouts outperform fuel-less ones?* If yes, fuel earns its weights; if no,
-the squeeze overlay dies and the coil-breakout stands on the headline numbers.
+**Three setups tested point-in-time — none clears the bar:**
+- **踏み上げ squeeze — NO-GO (2026-06-14).** Coil-breakout loses on its own (−0.08R 10y) and trails
+  TOPIX; the fuel A/B *fails* (fuel-gated worse than fuel-less), spring fired 0×. One flicker: the
+  SWEEP entry lifts win-rate ~2.5–4× over a plain break, but still sub-break-even at the fixed barrier.
+- **期日スイング deadline — NO-GO (2026-06-15, clean statistical null).** Treatment (imminent 6-mo
+  forced cover) vs placebo (same names, no deadline) A/B is **insignificant in both windows and flips
+  sign** (10y z=1.36/p=0.17; 3y z=−0.72/p=0.47). Forced-settlement *timing* carries no tradeable
+  edge; corroborating cohorts degenerate (due names are never coiled). `signals/deadline.py`
+  FIFO-rebuilds vintages from weekly deltas — honest approximations (rolls, 現渡し, ±1-week blur)
+  blunt the signal, never fake one.
+- **上方修正先回り revision — positive expectancy but BETA, no alpha (2026-06-15).** +0.07–0.16R
+  across windows but **vs TOPIX −0.12/−0.14R**; every anticipation feature split (sandbagger /
+  進捗率 anomaly / HOT) is flat. You earn the market's drift, not the signal's edge.
 
-**This is the project's GO/NO-GO gate.** The edge is still a *hypothesis* until a cohort clears a
-win-rate/expectancy bar. **No live size until it passes** (PLAYBOOK graduation ladder) — be willing
-to kill the project here if the edge isn't real.
+**Exit-model finding (the "median trade = −1R" leak).** The fixed −6% stop ≈ 1.5×ATR sits inside
+small/mid-cap noise → the median backtest trade stops out at −1R before any thesis plays.
+`labels.simulate_exit` adds **`ExitModel` kinds `atr` (barriers at entry ± k·ATR(14)) and
+`atr_trail` (Chandelier)** beside the legacy `fixed`, chosen by `Params.exit_model` (default `fixed`
+reproduces `first_touch_detail` exactly); the studies pass point-in-time ATR-at-entry. Measured via
+`backtest/exit_bakeoff.py`, which re-labels the *same* entries under each model. **Result: the fix is
+real but creates no alpha** — ATR pulls the median off −1R everywhere and takes the one entry with
+real drift (PEAD = reactive 上方修正) from *significantly* sub-TOPIX (−0.087R, t=−3.8) to index
+**parity** (−0.037R 10y; +0.010R out-of-sample 3y) — but no cohort/exit combination significantly
+beats TOPIX. The exit was a genuine leak; fixing it shows the **entry/selection is the binding
+constraint**, not the exit.
+
+**This remains the project's GO/NO-GO gate. No live size — the edge isn't there yet** (PLAYBOOK
+graduation ladder; be willing to kill the project here). The live thread if pursued: a selection
+filter on reactive up-revisions (PEAD) that the current flat features don't provide, tested via the
+wired `exit_model=atr` study path + the bake-off harness.
 
 ## Ranking
 
@@ -154,7 +186,10 @@ src/tse_scanner/
     jquants_sync.py  # idempotent backfill + weekly sync (margin, bars, TOPIX, fins)
     sources/         # free official feeds: jpx_universe, jpx_margin (the fuel), yahoo, jsf
   signals/           # fuel (the edge) · coil (timing) · ignition (trigger) · revision (上方修正圧)
-  backtest/          # labels (gap-aware first-touch triple-barrier) · event_study (GO/NO-GO + cohorts)
+                     #   · deadline (期日 forced-flow, FIFO vintages) · targets (exit map — display-only)
+  backtest/          # labels (gap-aware triple-barrier + ATR/atr_trail exit models via simulate_exit)
+                     #   · event_study (squeeze) · deadline_study · revision_study (A/B cohorts)
+                     #   · exit_bakeoff (re-label same entries under each exit model)
 .claude/
   skills/deep-research/SKILL.md   # research playbook: memo template, collector briefs, verdict schema
   agents/research-collector.md    # Sonnet ingest subagent (raw pages never reach the synthesis model)
@@ -175,7 +210,10 @@ headless `claude -p` run:
   `raw/<collector>.md`. The **wrapper owns all DuckDB writes** (running row on spawn → done/failed on
   exit). `verdict.json` schema: `verdict` (SUPPORTS|NEUTRAL|OPPOSES), `confidence`, `one_liner`,
   `squeeze_killers[]`, `catalysts[]`, `analyst_targets[]` (broker target-price cluster = the
-  exit-ceiling reference), `sources[]`.
+  *fundamental* exit ceiling; the *technical* one — T1/T2 — is scanner-computed and arrives via
+  the pack, never from the agent), `sector_view` (tailwind|neutral|headwind + one-liner — the
+  sector & sympathy read; the pack pre-computes peer stages and sector RS vs TOPIX from the
+  store's own bars, collectors only verify the narrative), `sources[]`.
 - **The verdict is a display-only overlay for the human — it NEVER feeds the scan score.** That's
   what keeps the quantitative scanner falsifiable; fundamentals are the discretionary entry/exit layer.
 - **Rails:** TTL skip if a `done` memo is < `TSE_RESEARCH_TTL_DAYS` (5d) old (`--force` overrides),
@@ -203,6 +241,7 @@ only `JQUANTS_API_KEY` (paid history) and the research knobs — see `.env.examp
 - **Point-in-time / no-lookahead is sacred** — publication-date reads, stop-high no-fill. Breaking
   either makes the backtest lie.
 - **DuckDB single-writer** — agents/UI spawn detached processes; never hold a long write connection.
-- **Research verdict is display-only** — it must never become a scan-score input.
+- **Research verdict & technical exit map are display-only** — neither may ever become a
+  scan-score input (the exit map answers "where do I sell?", not "what ranks higher?").
 - **Only official sources are automated** — aggregators are single-name human-eyeball/research reads.
 - **No live size until the event-study gate passes.**

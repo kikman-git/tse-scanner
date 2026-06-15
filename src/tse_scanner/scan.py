@@ -21,6 +21,7 @@ from tse_scanner.pipeline import Stage, classify
 from tse_scanner.signals import coil as coil_mod
 from tse_scanner.signals import fuel as fuel_mod
 from tse_scanner.signals import ignition as ign_mod
+from tse_scanner.signals import targets as tgt_mod
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -73,7 +74,9 @@ def run_scan(as_of: date | None = None, params: Params = PARAMS,
     # tail(baseline_sessions) of the rolling-BB(20) widths; box/ATR/volume are tail(≤20). So the
     # last (baseline_sessions + 60) sessions reproduce every signal **identically** while sparing
     # coil/ignition from chewing each name's full 10y history per scan (the backtest's cost).
-    lookback = params.baseline_sessions + 60
+    # The exit map's 52w-high/resistance window (exit_swing_lookback) is the one reader that
+    # wants more than the signals do — extend the slice for it, signals stay tail()-identical.
+    lookback = max(params.baseline_sessions + 60, params.exit_swing_lookback + 10)
     by_code = {c: g.set_index("date").tail(lookback) for c, g in prices.groupby("code")} \
         if not prices.empty else {}
     # Batched once (was a per-code query inside the loop — ~1.6k connects, the scan's bottleneck).
@@ -108,6 +111,9 @@ def run_scan(as_of: date | None = None, params: Params = PARAMS,
 )
         coil = coil_mod.assess(ohlc, params)
         ign = ign_mod.assess(ohlc, coil.box_high, coil.box_low, params)
+        # Exit map: display-only overlay for the human's exits (PLAYBOOK §F-01-H) — like the
+        # research verdict it must never feed stage/score below.
+        exit_map = tgt_mod.compute(ohlc, coil.box_high, coil.box_low, params)
 
         stage = classify(
             has_fuel=fuel.has_fuel,
@@ -143,6 +149,14 @@ def run_scan(as_of: date | None = None, params: Params = PARAMS,
                                and coil.box_height_atr != float("inf") else None),
             "box_high": round(coil.box_high, 2),
             "box_low": round(coil.box_low, 2),
+            "t1": round(exit_map.t1, 2),
+            "t2": round(exit_map.t2, 2),
+            "atr": round(exit_map.atr, 2) if exit_map.atr is not None else None,
+            "rr_t1": round(exit_map.rr_t1, 2) if exit_map.rr_t1 is not None else None,
+            "next_resistance": (round(exit_map.resistances[0], 2)
+                                if exit_map.resistances else None),
+            "high_52w": round(exit_map.high_52w, 2) if exit_map.high_52w is not None else None,
+            "blue_sky": bool(exit_map.blue_sky),
             "last_close": round(float(r.last_close), 2),
             "adv_yen": round(float(r.adv_yen), 0) if pd.notna(r.adv_yen) else None,
             "margin_as_of": r.margin_as_of if pd.notna(r.margin_as_of) else None,

@@ -26,6 +26,7 @@ verdict = {"verdict": "SUPPORTS", "confidence": "high", "one_liner": "bear thesi
            "bear_thesis": "broken", "squeeze_killers": [],
            "catalysts": [{"date": "2026-06-20", "event": "1Q決算", "inside_horizon": True}],
            "analyst_targets": [{"house": "野村", "target": 4200, "rating": "Buy", "date": "2026-05-30"}],
+           "sector_view": {"trend": "tailwind", "one_liner": "半導体ペアも軒並みPrimed"},
            "sources": ["https://example.com/a"]}
 open(out + "/verdict.json", "w").write(json.dumps(verdict, ensure_ascii=False))
 open(out + "/memo.md", "w").write("# 9999 TEST — deep research\\n\\nmemo body")
@@ -85,6 +86,7 @@ def test_run_research_done_roundtrip(tmp_path):
     assert "memo body" in row["memo_md"]
     assert json.loads(row["catalysts"])[0]["event"] == "1Q決算"
     assert json.loads(row["analyst_targets"])[0]["target"] == 4200
+    assert json.loads(row["sector_view"])["trend"] == "tailwind"
     # artifacts on disk: pack written by wrapper, memo/verdict by the (fake) agent
     run_dir = Path(row["memo_path"]).parent
     assert (run_dir / "pack.md").exists() and (run_dir / "verdict.json").exists()
@@ -127,6 +129,35 @@ def test_build_pack_surfaces_gaps_not_errors(tmp_path):
     md, warnings = build_pack("9999", store)
     assert "Context pack — 9999" in md and "+12%" in md
     assert any("no scan row" in w for w in warnings)
+    # empty store → the new computed blocks degrade to warnings, never crash the pack
+    assert any("technical exit map unavailable" in w for w in warnings)
+    assert any("sector context unavailable" in w for w in warnings)
+
+
+def test_build_pack_exit_map_and_sector_blocks(tmp_path):
+    """With bars + listed_info in the store the pack gains both computed blocks — the exit map
+    via the no-scan-row fallback (recomputed from bars) and the sector header from sector33."""
+    import pandas as pd
+
+    s = Settings(duckdb_path=tmp_path / "t.duckdb", data_dir=tmp_path / "data")
+    store = Store(s)
+    store.init_schema()
+    dates = pd.bdate_range(end=pd.Timestamp.today(), periods=60)
+    store.upsert_prices(pd.DataFrame({
+        "code": "7777", "date": dates, "open": 900.0, "high": 910.0, "low": 890.0,
+        "close": 900.0, "volume": 10_000,
+    }))
+    store.upsert_listed_info(pd.DataFrame([
+        {"code": "7777", "name": "テスト", "segment": "Standard", "segment_ja": "スタンダード",
+         "sector33": "電気機器", "is_domestic_equity": True, "is_taishaku": True},
+        {"code": "8888", "name": "ピア", "segment": "Standard", "segment_ja": "スタンダード",
+         "sector33": "電気機器", "is_domestic_equity": True, "is_taishaku": True},
+    ]))
+    md, warnings = build_pack("7777", store)
+    assert "## Technical exit map" in md and "T1" in md
+    assert "## Sector context" in md and "電気機器" in md
+    # only the (deliberately offline) yfinance snapshot may warn — never our computed blocks
+    assert not any("exit map" in w or "sector context" in w for w in warnings)
 
 
 def test_research_verdicts_join(tmp_path):

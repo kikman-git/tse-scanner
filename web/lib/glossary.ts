@@ -208,7 +208,40 @@ export const GLOSSARY: Record<string, GlossEntry> = {
   analyst_targets: {
     label: "Analyst targets",
     def: "Broker price-target cluster. Useful as the exit ceiling — squeezes often die where the " +
-      "street says fair value is. ⛰️ marks the highest.",
+      "street says fair value is. ⛰️ marks the highest. Compare with the technical exit map: " +
+      "whichever ceiling is lower binds first.",
+  },
+  sector_view: {
+    label: "Sector & sympathy",
+    ja: "セクター追い風/向かい風",
+    def: "Stocks move with their sector and squeezes cluster by theme. The memo's read on whether " +
+      "the 33業種 sector is a tailwind, neutral, or a headwind — peers also squeezing supports " +
+      "follow-through; a lone breakout against a falling sector argues for the mechanical exit.",
+  },
+
+  // --- technical exit map (price-structure exits; display-only, never a score input) ---------------
+  exit_map: {
+    label: "Technical exit map",
+    def: "Price-structure sell levels computed from the bars (not from analysts): measured-move " +
+      "T1/T2 off the coil box, overhead supply (prior swing highs, 52w high), ATR feasibility, " +
+      "round-number (節目) snapping. The technical counterweight to the analyst target cluster.",
+  },
+  t1: {
+    label: "T1 — measured move",
+    def: "Box high + 1× the box height — the classic projection of the coil's stored energy " +
+      "(T2 = +2× for the runner). Snapped to just below a round-number level (節目) when one is " +
+      "in the way, because TSE sell walls stack at round yen prices.",
+  },
+  rr: {
+    label: "R:R at T1",
+    def: "Reward-to-risk: (T1 − entry) ÷ (entry − box-low stop). Below ~1.5 the structure pays " +
+      "poorly even if it works — size down or pass.",
+  },
+  blue_sky: {
+    label: "Blue sky",
+    ja: "青天井",
+    def: "Price above its 52-week high — every prior buyer is in profit, so there is NO overhead " +
+      "supply. Targets become trail rules, not caps: let the runner run, trail behind structure.",
   },
 
   // --- jobs ---------------------------------------------------------------------------------------

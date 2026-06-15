@@ -184,10 +184,8 @@ def _backtest(args: argparse.Namespace) -> int:
 
     from datetime import date as _date
 
+    setup = getattr(args, "setup", "squeeze")
     cadence = getattr(args, "cadence", "daily")
-    print("backtest — point-in-time event study with first-touch labels (the GO/NO-GO gate).")
-    print(f"  label: +{PARAMS.target_pct:.0%} / -{PARAMS.stop_pct:.0%} within "
-          f"{PARAMS.horizon_sessions} sessions; publication-date margin; stop-high no-fill.")
     store = Store()
     with store.connect() as con:
         row = con.execute("SELECT min(published_date), max(published_date) FROM weekly_margin "
@@ -200,14 +198,38 @@ def _backtest(args: argparse.Namespace) -> int:
         start = _date.fromisoformat(args.start)
     if getattr(args, "end", None):
         end = _date.fromisoformat(args.end)
-    clock = "every trading day" if cadence == "daily" else "margin publication dates"
-    print(f"  replaying {clock} in [{start}.. {end}] ({cadence} cadence) …", flush=True)
-    res = run_event_study(start, end, PARAMS, store,
-                          progress=lambda m: print(m, flush=True), cadence=cadence)
+
+    if setup == "deadline":
+        from tse_scanner.backtest.deadline_study import run_deadline_study
+
+        print("backtest (deadline / 期日スイング) — forced 制度信用 settlement-flow event study.")
+        print(f"  label: +{PARAMS.target_pct:.0%} / -{PARAMS.stop_pct:.0%} within "
+              f"{PARAMS.deadline_horizon_sessions} sessions; FIFO vintages; publication-date margin.")
+        print(f"  scanning name-weeks in [{start}.. {end}] …", flush=True)
+        res = run_deadline_study(start, end, PARAMS, store,
+                                 progress=lambda m: print(m, flush=True))
+    elif setup == "revision":
+        from tse_scanner.backtest.revision_study import run_revision_study
+
+        print("backtest (revision / 上方修正先回り) — reactive-drift vs anticipatory event study.")
+        print(f"  label: +{PARAMS.target_pct:.0%} / -{PARAMS.stop_pct:.0%} within "
+              f"{PARAMS.rev_horizon_sessions} sessions; fins disclosed strictly-before; gap-aware fills.")
+        print(f"  scanning disclosures in [{start}.. {end}] …", flush=True)
+        res = run_revision_study(start, end, PARAMS, store,
+                                 progress=lambda m: print(m, flush=True))
+    else:
+        print("backtest — point-in-time event study with first-touch labels (the GO/NO-GO gate).")
+        print(f"  label: +{PARAMS.target_pct:.0%} / -{PARAMS.stop_pct:.0%} within "
+              f"{PARAMS.horizon_sessions} sessions; publication-date margin; stop-high no-fill.")
+        clock = "every trading day" if cadence == "daily" else "margin publication dates"
+        print(f"  replaying {clock} in [{start}.. {end}] ({cadence} cadence) …", flush=True)
+        res = run_event_study(start, end, PARAMS, store,
+                              progress=lambda m: print(m, flush=True), cadence=cadence)
     print(f"  events: {res.n_events}   labels: {res.label_counts}")
     if res.n_events:
-        print(f"  win-rate: {res.win_rate:.1%}   expectancy: {res.expectancy_r:+.2f}R   "
-              f"Primed→Igniting: {res.primed_to_igniting_rate:.1%}")
+        _p2i = res.primed_to_igniting_rate
+        p2i = f"   Primed→Igniting: {_p2i:.1%}" if _p2i == _p2i else ""
+        print(f"  win-rate: {res.win_rate:.1%}   expectancy: {res.expectancy_r:+.2f}R{p2i}")
         vt = f"{res.vs_topix:+.2f}R" if res.vs_topix == res.vs_topix else "n/a (no TOPIX stored)"
         print(f"  vs TOPIX (matched windows): {vt}")
         for name, c in res.splits.items():
@@ -279,6 +301,11 @@ def build_parser() -> argparse.ArgumentParser:
             sp.add_argument("--force", action="store_true",
                             help="re-run even if a memo younger than TSE_RESEARCH_TTL_DAYS exists")
         if name == "backtest":
+            sp.add_argument("--setup", choices=["squeeze", "deadline", "revision"],
+                            default="squeeze",
+                            help="which setup's event study to run: squeeze (coil/fuel/ignition — "
+                                 "the GO/NO-GO gate, default), deadline (期日スイング forced-flow), "
+                                 "revision (上方修正先回り — needs `ingest --fins`).")
             sp.add_argument("--cadence", choices=["daily", "weekly"], default="daily",
                             help="replay clock: daily = every trading day (representative — "
                                  "ignition is a daily breakout); weekly = margin publication dates "

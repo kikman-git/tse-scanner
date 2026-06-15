@@ -7,7 +7,8 @@ playbook says what I actually *do* with them — sizing, entry tactics, stops, t
 the post-mortem.
 
 Last updated: 2026-06-12 *(de-gated ladder, sweep trigger, F-02 revision setup, F-03 期日 idea,
-glossary for the learning phase; references updated from the retired DESIGN.md to `CLAUDE.md`)*.
+glossary for the learning phase; references updated from the retired DESIGN.md to `CLAUDE.md`;
+technical exit map (T1/T2 · 節目 · 青天井) + sector & sympathy context added to §F-01-H/N/O)*.
 
 ---
 
@@ -46,6 +47,22 @@ this is the rule that protects the account from a backtest that lied.
 | 🟡 Paper / Small | Live but on paper or minimum size, gathering my own sample |
 | 🟢 Live | Cleared to full size |
 | 🔴 Retired | Edge decayed or disproven — kept for the lesson |
+
+> **Validation status (2026-06-15) — all three setups event-study tested point-in-time; none cleared
+> the gate, so nothing has graduated past Building. No live size.** (Detail + numbers in CLAUDE.md
+> §Validation.)
+> - **F-01 踏み上げ squeeze — NO-GO.** Coil-breakout loses & trails TOPIX; fuel A/B fails; spring 0×.
+>   Only flicker: the SWEEP entry's ~2.5–4× win-rate lift (still sub-break-even at the fixed barrier).
+> - **F-03 期日スイング deadline — NO-GO (clean null).** Forced-cover *timing* vs same-name placebo is
+>   statistically insignificant in both windows and flips sign. No edge.
+> - **F-02 上方修正先回り revision — positive expectancy but BETA, not alpha.** Makes +0.07–0.16R but
+>   stays **sub-TOPIX (−0.12/−0.14R)** and the anticipation features are flat. You earn index drift.
+> - **Exit-model fix (the −1R-median leak):** the fixed −6% stop sits in small/mid-cap noise. An
+>   **ATR-scaled stop/target (or Chandelier trail)** pulls the median off −1R and takes the one entry
+>   with real drift — **PEAD (reactive up-revision)** — from significantly sub-TOPIX to **index
+>   parity**, but no further. Take-away for live trading: **size risk in ATR, not a flat %**; and the
+>   binding constraint is *which* names you pick, not where you exit. Live thread = a selection filter
+>   on up-revision PEAD that the current features don't yet provide.
 
 ---
 
@@ -86,6 +103,10 @@ shows the same definitions as hover/tap tooltips.
 | **寄り成り** | Market-on-open order — the next-session entry option after a missed locked board (gap risk is mine). |
 | **ADV** | Average daily volume/turnover (the scanner shows ¥ turnover). My liquidity floor: a squeeze I can't exit at size is a trap *for me*. |
 | **WRB / wide-range bar** | A bar with unusually large high-low range — with volume, the signature of a real break vs a drift-over. |
+| **Measured move** | The classic target for a box breakout: box high + 1× the box's height (T1; T2 = +2×). The coil's stored energy projected upward — the scanner's technical exit map computes it per name. |
+| **節目** (round-number level) | Round yen prices (¥500/1,000/1,500…) where TSE sell orders stack. Targets are snapped to just *below* the nearest 節目 — sell in front of the wall, not into it. |
+| **青天井** (blue sky) | Price above its 52-week high: every earlier buyer is in profit, so **no overhead supply exists**. Exit targets become trail rules, not caps — let the runner run. |
+| **Overhead supply / resistance** | Prior swing highs where trapped buyers wait to "get out even" — real sellers meet the covering there. The exit map lists the next shelf above entry. |
 
 ### Scanner terms — the dashboard itself
 
@@ -111,9 +132,9 @@ shows the same definitions as hover/tap tooltips.
 
 | ID | Name | Dir. | Scanner stage → act on | Status | Edge in one line |
 |---|---|---|---|---|---|
-| **F-01** | Fumiage (踏み上げ) short squeeze / coil breakout | Long | `Igniting` (watch from `Primed`) | 🔵 Building — event study running | Crowded, trapped shorts read off the margin tape + a wound price coil → catch the upside break that runs them. |
-| **F-02** | 上方修正先回り (guidance-raise anticipation) | Long | revision overlay on `Primed`/coil names | 🔵 Building — features built, study not run | Chronic sandbaggers with anomalous progress vs guidance, bought *before* the revision IR gaps the stock. |
-| **F-03** | 期日スイング (margin-deadline swing) | Long | `Crowded` + deadline window | ⚪ Idea — not green-lit | 制度信用 shorts *must* close within 6 months — deadline waves are calendar-predictable forced buying. |
+| **F-01** | Fumiage (踏み上げ) short squeeze / coil breakout | Long | `Igniting` (watch from `Primed`) | 🔴 NO-GO (2026-06-14) — sweep sub-thread open | Crowded, trapped shorts read off the margin tape + a wound price coil → catch the upside break that runs them. |
+| **F-02** | 上方修正先回り (guidance-raise anticipation) | Long | revision overlay on `Primed`/coil names | 🔴 NO-GO (2026-06-15) — beta, not alpha; reactive-PEAD thread | Chronic sandbaggers with anomalous progress vs guidance, bought *before* the revision IR gaps the stock. |
+| **F-03** | 期日スイング (margin-deadline swing) | Long | `Crowded` + deadline window | 🔴 NO-GO (2026-06-15) — clean statistical null | 制度信用 shorts *must* close within 6 months — deadline waves are calendar-predictable forced buying. |
 
 ---
 
@@ -139,7 +160,7 @@ shows the same definitions as hover/tap tooltips.
 
 ---
 
-## Setup F-01 — Fumiage (踏み上げ) short squeeze / coil breakout  ·  LONG  ·  🔵 Building
+## Setup F-01 — Fumiage (踏み上げ) short squeeze / coil breakout  ·  LONG  ·  🔴 NO-GO (2026-06-14; SWEEP sub-thread open)
 
 > **Not tradeable yet.** Detection is built; the 3y+10y daily event study is running as of
 > 2026-06-12. First verdict at the original gates was **UNTESTABLE (n=1 in 10y)** — hence the
@@ -271,7 +292,21 @@ Squeezes **spike and fade** — I plan to *sell into strength*, not round-trip i
 - **First-touch target** +`〔12%〕` within ~`〔10〕` sessions is the backtest's win label (first-touch
   triple-barrier; sweep events use the per-event R:R-scaled equivalent). I trade to match the label:
   **scale out into the spike.**
-- Plan: `〔e.g. sell ⅓ at +1R, ⅓ into the first ストップ高 / target tag, trail the last ⅓〕`.
+- **Technical exit map (scanner-computed — detail page + research pack).** Two ceilings cap every
+  squeeze: the *technical* one (price structure) and the *fundamental* one (the memo's analyst TP
+  cluster). **The lower ceiling binds first.** The technical side, computed from the bars:
+  - **T1 = box high + 1× box height** (measured move — the coil's stored energy), **T2 = +2×** for
+    the runner. Both snap to just **below** the nearest 節目 — TSE sell walls stack at round yen
+    levels; I sell *in front of* the wall, never into it.
+  - **Overhead supply:** prior swing highs + the 52-week high — covering meets real sellers there;
+    the first shelf above entry is where the first trim goes if it's nearer than T1.
+  - **青天井 (blue sky — above the 52w high):** *no* overhead supply exists. The map inverts from
+    caps to **trail rules** — let the runner run behind structure (§I), don't sell a number.
+  - **Feasibility check:** T1 in ATR units vs ~1σ over the horizon (ATR·√10). A target the time
+    stop can't plausibly reach = trim the plan to what fits, or accept more scratches.
+  - **Vs the analyst cluster:** analyst TPs *below* T1 → expect supply early (the street is selling
+    my target to me — trim sooner); cluster well above T1 + 💚 SUPPORTS → more rope for the runner.
+- Plan: `〔e.g. sell ⅓ at +1R, ⅓ into the first ストップ高 / T1 tag, trail the last ⅓〕`.
 - **Memo modulates the runner, not the target:** 🔴 OPPOSES → no runner, full exit at target (§D).
   💚 SUPPORTS with a dated catalyst still ahead (決算 beat streak, buyback window) → trail the last
   ⅓ wider. A memo **catalyst inside the horizon** (flagged in the dashboard) = know *before* entry
@@ -322,6 +357,8 @@ The fuel is potential; a catalyst lights it. Bigger edge when the ignition coinc
 |---|---|
 | Bear case, dilution risk, catalysts, float | `tse-scanner research <code>` memo (🔬 button) · 株探 · IR BANK · karauri.net |
 | 信用売残 / 買残 / 倍率, days-to-cover | Scanner (J-Quants weekly margin) · broker screen · 株探 |
+| Technical exit map (T1/T2, overhead supply, 青天井, R:R) | Scanner detail page (computed from bars) — reconcile w/ memo's analyst cluster |
+| Sector & sympathy (peer stages, sector RS vs TOPIX) | Research pack (computed) + memo §7 narrative |
 | 逆日歩, daily 貸借残, 株不足 | 日証金 (JSF) · トレーダーズ・ウェブ · 株探 |
 | Coil / box / volume / break | Scanner + chart |
 | 増担保規制 / 日々公表 / 監理・整理 | JPX/TSE notices · broker alerts |
@@ -337,8 +374,11 @@ DtC pctile ≥ 0.90 (floor ≥1)?  [ ]   信用倍率 < 1?              [ ]
 Confirmed trigger? (break: close>box high+vol+wide · sweep: reclaim+wick) [ ]
 NO 増担保 / 日々公表 / 監理?    [ ]   No earnings in horizon?    [ ]
 Research memo (≤5d old): verdict 💚/⚪/🔴 ___  squeeze-killers? ___  catalyst in horizon? ___
+Sector: tailwind/neutral/headwind ___   peers also primed/igniting? ___
 Box high ___  box low ___  entry ___  stop ___ (sweep: wick low ___)  size(1R) ___ shares
 Stop-high plan if it locks: ___ (default: stand down + retest)
+Exit map: T1 ___  T2 ___  next resistance ___  青天井? ___  R:R@T1 ___
+Analyst ceiling ___ → lower ceiling binds: technical / analyst
 Target ___  time stop ___ sessions   Risk = 1R = ¥___ (___% acct)
 ```
 
@@ -374,7 +414,7 @@ and the realized R.〕`
 
 ---
 
-## Setup F-02 — 上方修正先回り (guidance-raise anticipation)  ·  LONG  ·  🔵 Building
+## Setup F-02 — 上方修正先回り (guidance-raise anticipation)  ·  LONG  ·  🔴 NO-GO (2026-06-15; beta not alpha — reactive-PEAD thread open)
 
 > **Not tradeable yet — detection features exist (`signals/revision.py`), the event study hasn't
 > run.** Foundation built 2026-06-12; the fins backfill and the two study arms are queued.
@@ -416,7 +456,7 @@ Two candidate arms, to be settled by the event study:
 
 ---
 
-## Setup F-03 — 期日スイング (margin-deadline swing)  ·  LONG  ·  ⚪ Idea
+## Setup F-03 — 期日スイング (margin-deadline swing)  ·  LONG  ·  🔴 NO-GO (2026-06-15; clean statistical null)
 
 > **Sketch only — not specified, not green-lit.** Parked here so the thesis isn't lost.
 
