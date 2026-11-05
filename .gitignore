@@ -5,20 +5,39 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 .ipynb_checkpoints/
+build/
+dist/
 
-# Secrets — J-Quants credentials live here, never commit
+# Secrets — J-Quants credentials live in .env, never commit. .env.example is the tracked template.
 .env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
 
-# Data store (DESIGN.md §8: DuckDB + Parquet). Large + reproducible from ingestion.
+# Data store: DuckDB + Parquet. ~1.4 GB, large + reproducible from ingestion, never commit.
+# `data/` is ignored as a whole (stores, raw JPX downloads, event-study parquet, research memos, logs,
+# and the two backtest driver scripts that happen to live there). The narrower rules below are kept
+# so that loosening `data/` later cannot start tracking the big files.
+/data/
 data/*.duckdb
 data/*.parquet
 data/raw/
 data/cache/
 
-# Deep-research run artifacts (DESIGN.md §15) — memos live in the DuckDB research table;
+# Deep-research run artifacts — memos live in the DuckDB research table;
 # the per-run dirs (pack/memo/verdict/raw collector reports/logs) are a local archive.
 data/research/
+
+# Databases anywhere else (TSE_DUCKDB_PATH can point outside data/)
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite3
+*.db
 
 # Node / Next.js (web/) — reinstall with `npm install` in web/, rebuild with `npm run build`
 node_modules/
@@ -29,6 +48,15 @@ next-env.d.ts
 
 # Logs (runtime, reproducible)
 *.log
+logs/
+
+# Backups
+*.bak*
+
+# Claude Code: .claude/skills and .claude/agents are shared project files (the deep-research skill and
+# collector agent that `tse-scanner research` runs); only per-machine settings stay local.
+.claude/settings.local.json
+CLAUDE.local.md
 
 # OS
 .DS_Store
