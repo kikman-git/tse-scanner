@@ -182,3 +182,7 @@ tests/               # pytest
 - **`next start` needs `next build` first** (see Run / deploy); `web/.next` is not in git.
 - Code comments, `Makefile`, `.env.example` and the unit files' `Documentation=` still cite `DESIGN.md` / `PLAN.md`. Both were deleted in `db6c56b`; `CLAUDE.md` is the source of truth.
 - Point-in-time discipline is sacred: publication-date reads, stop-high no-fill and gap-aware fills must not regress, and the verdict / exit map must never become score inputs (`CLAUDE.md` → Red lines).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
